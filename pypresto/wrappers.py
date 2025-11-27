@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import ctypes
 import numpy as np
+from typing import List
 
 try:
     from . import matrix_module as mm
@@ -1518,7 +1519,7 @@ def rank_matrix_csc(
     nrow: int,
     ncol: int,
     nthreads: int = 1 
-) -> list[list[float]]:
+) -> List[List[float]]:
     """
     Compute average ranks for non-zero elements in a CSC-formatted sparse matrix, column-wise.
 
