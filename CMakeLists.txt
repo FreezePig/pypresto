@@ -16,18 +16,31 @@ execute_process(
 
 # --- 3. find openmp ---
 if(APPLE)
-    if(EXISTS "/opt/homebrew/opt/libomp")
-        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
-        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/opt/homebrew/opt/libomp/include")
+    find_program(BREW_CMD brew)
+    set(LIBOMP_PREFIX "")
+    if(BREW_CMD)
+        execute_process(COMMAND ${BREW_CMD} --prefix libomp
+                OUTPUT_VARIABLE LIBOMP_PREFIX
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+    endif()
+    if(NOT LIBOMP_PREFIX)
+        if(EXISTS "/opt/homebrew/opt/libomp")     # Apple Silicon
+            set(LIBOMP_PREFIX "/opt/homebrew/opt/libomp")
+        elseif(EXISTS "/usr/local/opt/libomp")    # Intel Mac
+            set(LIBOMP_PREFIX "/usr/local/opt/libomp")
+        endif()
+    endif()
+    if(LIBOMP_PREFIX)
+        message(STATUS ">>> Found macOS OpenMP prefix: ${LIBOMP_PREFIX}")
+        include_directories("${LIBOMP_PREFIX}/include")
+        link_directories("${LIBOMP_PREFIX}/lib")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
         set(OpenMP_C_LIB_NAMES "omp")
         set(OpenMP_CXX_LIB_NAMES "omp")
-        set(OpenMP_omp_LIBRARY "/opt/homebrew/opt/libomp/lib/libomp.dylib")
-    elseif(EXISTS "/usr/local/opt/libomp")
-        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
-        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I/usr/local/opt/libomp/include")
-        set(OpenMP_C_LIB_NAMES "omp")
-        set(OpenMP_CXX_LIB_NAMES "omp")
-        set(OpenMP_omp_LIBRARY "/usr/local/opt/libomp/lib/libomp.dylib")
+        set(OpenMP_omp_LIBRARY "${LIBOMP_PREFIX}/lib/libomp.dylib")
+    else()
+        message(WARNING ">>> Could NOT find libomp prefix! OpenMP linking might fail.")
     endif()
 endif()
 
@@ -95,19 +108,7 @@ target_link_libraries(matrix_module PRIVATE ${BLAS_LIBRARIES})
 if(OpenMP_CXX_FOUND)
     target_link_libraries(matrix_module PRIVATE OpenMP::OpenMP_CXX)
     if(APPLE)
-        find_library(MACOS_LIBOMP_PATH
-                NAMES omp libomp
-                PATHS
-                "/opt/homebrew/opt/libomp/lib"
-                "/usr/local/opt/libomp/lib"
-                NO_DEFAULT_PATH
-        )
-        if(MACOS_LIBOMP_PATH)
-            message(STATUS ">>> macOS Fix: Explicitly linking OpenMP library: ${MACOS_LIBOMP_PATH}")
-            target_link_libraries(matrix_module PRIVATE ${MACOS_LIBOMP_PATH})
-        else()
-            message(WARNING ">>> macOS Fix: Could NOT find libomp.dylib in standard Homebrew paths!")
-        endif()
+        target_link_libraries(matrix_module PRIVATE omp)
     endif()
 endif()
 
