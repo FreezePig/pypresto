@@ -13,8 +13,11 @@ from typing import List
 
 try:
     from . import matrix_module as mm
-except ImportError:
-    import matrix_module as mm
+except ImportError as e:
+    raise ImportError(
+        "Failed to import C++ extension 'matrix_module'. "
+        "Please ensure the package is installed correctly (not just cloned)."
+    ) from e
 
 integer_dtypes = {
     np.dtype('uint8'), np.dtype('uint16'), np.dtype('uint32'), np.dtype('uint64'),

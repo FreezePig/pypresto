@@ -35,9 +35,14 @@ skip = ["pp*", "*-musllinux*"]
 test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
 
 [tool.cibuildwheel.linux]
-before-all = "yum install -y openblas-devel"
+before-all = "yum install -y openblas-devel pkgconfig libgomp"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]
 before-all = "brew install openblas libomp"
-environment = { PKG_CONFIG_PATH="/usr/local/opt/openblas/lib/pkgconfig:/opt/homebrew/opt/openblas/lib/pkgconfig" }
+
+[tool.cibuildwheel.macos.environment]
+PKG_CONFIG_PATH = "/usr/local/opt/openblas/lib/pkgconfig:/opt/homebrew/opt/openblas/lib/pkgconfig"
+CFLAGS = "-Xpreprocessor -fopenmp -I$(brew --prefix libomp)/include"
+CXXFLAGS = "-Xpreprocessor -fopenmp -I$(brew --prefix libomp)/include"
+LDFLAGS = "-L$(brew --prefix libomp)/lib -lomp"

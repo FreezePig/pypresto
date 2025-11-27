@@ -97,19 +97,32 @@ endif()
 # --- 5. define target module ---
 pybind11_add_module(matrix_module main.cpp)
 
-# Header file path
-target_include_directories(matrix_module PRIVATE
-    ${NUMPY_INCLUDE_DIR}  # find pybind11/numpy.h
-)
+# NumPy headers (only if needed)
+target_include_directories(matrix_module PRIVATE ${NUMPY_INCLUDE_DIR})
 
-# link library
-target_link_libraries(matrix_module PRIVATE ${BLAS_LIBRARIES})
+# BLAS
+if(WIN32)
+    target_include_directories(matrix_module PRIVATE "${OPENBLAS_ROOT}/include")
+    target_link_libraries(matrix_module PRIVATE "${OPENBLAS_ROOT}/lib/libopenblas.dll.a")
+else()
+    target_include_directories(matrix_module PRIVATE ${BLAS_INCLUDE_DIRS})
+    target_link_libraries(matrix_module PRIVATE ${BLAS_LIBRARIES})
+endif()
 
+# OpenMP
 if(OpenMP_CXX_FOUND)
     target_link_libraries(matrix_module PRIVATE OpenMP::OpenMP_CXX)
-    if(APPLE)
-        target_link_libraries(matrix_module PRIVATE omp)
+    if(APPLE AND LIBOMP_PREFIX)
+        target_link_libraries(matrix_module PRIVATE "${LIBOMP_PREFIX}/lib/libomp.dylib")
     endif()
+endif()
+
+# macOS RPATH
+if(APPLE)
+    set_target_properties(matrix_module PROPERTIES
+            INSTALL_RPATH "@loader_path"
+            BUILD_WITH_INSTALL_RPATH TRUE
+    )
 endif()
 
 # compilation options
@@ -118,5 +131,3 @@ if(MSVC)
 else()
     target_compile_options(matrix_module PRIVATE -O3 -Wall -fvisibility=hidden)
 endif()
-
-install(TARGETS matrix_module DESTINATION .)
