@@ -94,6 +94,27 @@ target_link_libraries(matrix_module PRIVATE ${BLAS_LIBRARIES})
 
 if(OpenMP_CXX_FOUND)
     target_link_libraries(matrix_module PRIVATE OpenMP::OpenMP_CXX)
+    # Link OpenMP library explicitly on macOS
+    if (APPLE)
+        find_program(BREW_CMD brew)
+        if(BREW_CMD)
+            execute_process(COMMAND ${BREW_CMD} --prefix libomp
+                    OUTPUT_VARIABLE LIBOMP_PREFIX
+                    OUTPUT_STRIP_TRAILING_WHITESPACE)
+            set(LIBOMP_PATH "${LIBOMP_PREFIX}/lib/libomp.dylib")
+
+            if(EXISTS "${LIBOMP_PATH}")
+                message(STATUS "Mac Fix: Forcing link to ${LIBOMP_PATH}")
+                target_link_libraries(matrix_module PRIVATE "${LIBOMP_PATH}")
+            endif()
+        else()
+            if(EXISTS "/usr/local/opt/libomp/lib/libomp.dylib")
+                target_link_libraries(matrix_module PRIVATE "/usr/local/opt/libomp/lib/libomp.dylib")
+            elseif(EXISTS "/opt/homebrew/opt/libomp/lib/libomp.dylib")
+                target_link_libraries(matrix_module PRIVATE "/opt/homebrew/opt/libomp/lib/libomp.dylib")
+            endif()
+        endif()
+    endif()
 endif()
 
 # compilation options
