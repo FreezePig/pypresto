@@ -28,8 +28,6 @@ jobs:
             CFLAGS="-I$(brew --prefix libomp)/include $CFLAGS"
             CXXFLAGS="-I$(brew --prefix libomp)/include $CXXFLAGS"
             LDFLAGS="-L$(brew --prefix libomp)/lib -lomp $LDFLAGS"
-            CMAKE_PREFIX_PATH="$(brew --prefix libomp)"
-            OpenMP_ROOT="$(brew --prefix libomp)"
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
