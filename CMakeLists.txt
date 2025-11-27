@@ -17,7 +17,7 @@ execute_process(
 
 # --- 3. Find Openmp ---
 if(APPLE)
-
+    # 1. Find brew installed libomp
     find_program(BREW_CMD brew)
     if(BREW_CMD)
         execute_process(COMMAND ${BREW_CMD} --prefix libomp
@@ -25,7 +25,7 @@ if(APPLE)
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
     endif()
 
-
+    # 2. Path fallback mechanism
     if(NOT EXISTS "${BREW_OPENMP_PREFIX}")
         if(EXISTS "/opt/homebrew/opt/libomp")
             set(BREW_OPENMP_PREFIX "/opt/homebrew/opt/libomp")
@@ -34,19 +34,35 @@ if(APPLE)
         endif()
     endif()
 
-
     if(BREW_OPENMP_PREFIX)
-        message(STATUS "macOS: Detected OpenMP at ${BREW_OPENMP_PREFIX}")
+        message(STATUS "macOS: Found OpenMP prefix at ${BREW_OPENMP_PREFIX}")
+
+        # Force setting OpenMP_ROOT helps FindOpenMP locate the header file.
         set(OpenMP_ROOT "${BREW_OPENMP_PREFIX}")
-        list(APPEND CMAKE_PREFIX_PATH "${BREW_OPENMP_PREFIX}")
+
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${BREW_OPENMP_PREFIX}/include")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I${BREW_OPENMP_PREFIX}/include")
+
+        set(OpenMP_CXX_LIB_NAMES "omp")
+        set(OpenMP_C_LIB_NAMES "omp")
+        set(OpenMP_omp_LIBRARY "${BREW_OPENMP_PREFIX}/lib/libomp.dylib")
+
         include_directories("${BREW_OPENMP_PREFIX}/include")
         link_directories("${BREW_OPENMP_PREFIX}/lib")
     else()
-        message(WARNING "macOS: Could not detect libomp path via brew. Build may fail.")
+        message(WARNING "macOS: libomp not found. Please run 'brew install libomp'")
     endif()
 endif()
 
 find_package(OpenMP REQUIRED)
+
+if(OpenMP_FOUND AND APPLE)
+    if(NOT OpenMP_CXX_FLAGS MATCHES "-Xpreprocessor")
+        message(STATUS "macOS: Patching OpenMP flags for AppleClang")
+        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp ${OpenMP_CXX_FLAGS}")
+        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp ${OpenMP_C_FLAGS}")
+    endif()
+endif()
 
 if(OpenMP_FOUND)
     message(STATUS "OpenMP Found. Version: ${OpenMP_CXX_VERSION}")
