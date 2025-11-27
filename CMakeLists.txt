@@ -131,3 +131,10 @@ if(MSVC)
 else()
     target_compile_options(matrix_module PRIVATE -O3 -Wall -fvisibility=hidden)
 endif()
+
+install(TARGETS matrix_module DESTINATION .)
+install(TARGETS matrix_module
+        LIBRARY DESTINATION .
+        ARCHIVE DESTINATION .
+        RUNTIME DESTINATION .
+)
