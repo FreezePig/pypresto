@@ -16,45 +16,52 @@ execute_process(
 )
 
 # --- 3. Find Openmp ---
-set(OMP_FOUND FALSE)
+#set(OMP_FOUND FALSE)
+#
+#if(APPLE)
+#    find_program(BREW_CMD brew)
+#    set(LIBOMP_PREFIX "")
+#    if(BREW_CMD)
+#        execute_process(COMMAND ${BREW_CMD} --prefix libomp
+#                OUTPUT_VARIABLE LIBOMP_PREFIX
+#                OUTPUT_STRIP_TRAILING_WHITESPACE)
+#    endif()
+#
+#    if(NOT LIBOMP_PREFIX)
+#        if(EXISTS "/opt/homebrew/opt/libomp")
+#            set(LIBOMP_PREFIX "/opt/homebrew/opt/libomp")
+#        elseif(EXISTS "/usr/local/opt/libomp")
+#            set(LIBOMP_PREFIX "/usr/local/opt/libomp")
+#        endif()
+#    endif()
+#    if(LIBOMP_PREFIX AND EXISTS "${LIBOMP_PREFIX}/lib/libomp.dylib")
+#        message(STATUS "Configuring Custom OpenMP from: ${LIBOMP_PREFIX}")
+#
+#        if(NOT TARGET OpenMP::OpenMP_CXX)
+#            add_library(OpenMP::OpenMP_CXX SHARED IMPORTED)
+#            set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
+#                    IMPORTED_LOCATION "${LIBOMP_PREFIX}/lib/libomp.dylib"
+#                    INTERFACE_INCLUDE_DIRECTORIES "${LIBOMP_PREFIX}/include"
+#                    INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
+#                    INTERFACE_LINK_LIBRARIES "${LIBOMP_PREFIX}/lib/libomp.dylib"
+#            )
+#        endif()
+#        set(OMP_FOUND TRUE)
+#    endif()
+#endif()
+#
+#if(NOT OMP_FOUND)
+#    find_package(OpenMP REQUIRED)
+#    message(STATUS "OpenMP Found via standard package. Version: ${OpenMP_CXX_VERSION}")
+#endif()
+find_package(OpenMP REQUIRED)
 
-if(APPLE)
-    find_program(BREW_CMD brew)
-    set(LIBOMP_PREFIX "")
-    if(BREW_CMD)
-        execute_process(COMMAND ${BREW_CMD} --prefix libomp
-                OUTPUT_VARIABLE LIBOMP_PREFIX
-                OUTPUT_STRIP_TRAILING_WHITESPACE)
-    endif()
-
-    if(NOT LIBOMP_PREFIX)
-        if(EXISTS "/opt/homebrew/opt/libomp")
-            set(LIBOMP_PREFIX "/opt/homebrew/opt/libomp")
-        elseif(EXISTS "/usr/local/opt/libomp")
-            set(LIBOMP_PREFIX "/usr/local/opt/libomp")
-        endif()
-    endif()
-    if(LIBOMP_PREFIX AND EXISTS "${LIBOMP_PREFIX}/lib/libomp.dylib")
-        message(STATUS "Configuring Custom OpenMP from: ${LIBOMP_PREFIX}")
-
-        if(NOT TARGET OpenMP::OpenMP_CXX)
-            add_library(OpenMP::OpenMP_CXX SHARED IMPORTED)
-            set_target_properties(OpenMP::OpenMP_CXX PROPERTIES
-                    IMPORTED_LOCATION "${LIBOMP_PREFIX}/lib/libomp.dylib"
-                    INTERFACE_INCLUDE_DIRECTORIES "${LIBOMP_PREFIX}/include"
-                    INTERFACE_COMPILE_OPTIONS "-Xpreprocessor;-fopenmp"
-                    INTERFACE_LINK_LIBRARIES "${LIBOMP_PREFIX}/lib/libomp.dylib"
-            )
-        endif()
-        set(OMP_FOUND TRUE)
-    endif()
+if(OpenMP_FOUND)
+    message(STATUS "OpenMP Found. Version: ${OpenMP_CXX_VERSION}")
+    message(STATUS "OpenMP Libs: ${OpenMP_CXX_LIBRARIES}")
+else()
+    message(FATAL_ERROR "Could NOT find OpenMP. Please ensure libomp is installed and paths are set.")
 endif()
-
-if(NOT OMP_FOUND)
-    find_package(OpenMP REQUIRED)
-    message(STATUS "OpenMP Found via standard package. Version: ${OpenMP_CXX_VERSION}")
-endif()
-
 # ---4. OpenBLAS setup ---
 if(WIN32)
     set(OPENBLAS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/OpenBLAS")
