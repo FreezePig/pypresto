@@ -59,7 +59,7 @@ else()
         pkg_check_modules(OpenBLAS openblas)
     endif()
 
-    if(Not OpenBLAS_FOUND)
+    if(NOT OpenBLAS_FOUND)
         find_package(OpenBLAS REQUIRED)
     endif()
 
