@@ -1,0 +1,45 @@
+[build-system]
+requires = [
+    "scikit-build-core",
+    "pybind11",
+    "cmake",
+    "ninja",
+    "numpy"
+]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pypresto"
+version = "0.1.0"
+
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas",
+    "anndata",
+    "scipy",
+    "statsmodels"
+]
+
+[tool.scikit-build]
+cmake.version = ">=3.15"
+
+[tool.scikit-build.wheel]
+install-dir = "pypresto"
+packages = ["pypresto"]
+
+[tool.scikit-build.cmake.define]
+BUILD_TESTING = "OFF"
+
+[tool.cibuildwheel]
+# skip PyPy and musllinux, only build CPython
+skip = ["pp*", "*-musllinux*"]
+test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
+
+[tool.cibuildwheel.linux]
+before-all = "yum install -y openblas-devel"
+
+[tool.cibuildwheel.macos]
+archs = ["x86_64", "arm64"]
+before-all = "brew install openblas libomp"
+environment = { PKG_CONFIG_PATH="/usr/local/opt/openblas/lib/pkgconfig:/opt/homebrew/opt/openblas/lib/pkgconfig" }
