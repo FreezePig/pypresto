@@ -51,28 +51,34 @@ if(WIN32)
     
     # Try linking the static library libopenblas.a (if it exists) to avoid DLL dependencies.
     # If only .lib or .dll.a files are available, you will need to use delvewheel to fix them after packaging.
-    set(BLAS_LIBRARIES libopenblas) 
+    set(BLAS_LIBRARIES libopenblas)
 else()
-    # Linux and macOS use standard CMake lookup.
-    find_package(PkgConfig QUIET)
-    if (PKG_CONFIG_FOUND)
-        pkg_check_modules(OpenBLAS openblas)
-    endif()
 
-    if(NOT OpenBLAS_FOUND)
-        find_package(OpenBLAS REQUIRED)
-    endif()
+    # 1. Find any BLAS library (OpenBLAS/MKL/Atlas etc.)
+    # Using CMake FindBLAS.cmake
+    find_package(BLAS REQUIRED)
 
-    if(OpenBLAS_INCLUDE_DIRS)
-        include_directories(${OpenBLAS_INCLUDE_DIRS})
-    else()
-        find_path(CBLAS_INCLUDE_DIR cblas.h
-                PATHS /usr/include/openblas /usr/local/include/openblas /opt/homebrew/include /usr/include
+    # 2. Find header cblas.h
+    if(NOT BLAS_INCLUDE_DIRS)
+        find_path(BLAS_INCLUDE_DIRS cblas.h
+                PATHS
+                /usr/include/openblas
+                /usr/local/include/openblas
+                /opt/homebrew/include
+                /opt/homebrew/opt/openblas/include
+                /usr/include
+                /usr/local/include
         )
-        if(CBLAS_INCLUDE_DIR)
-            include_directories(${CBLAS_INCLUDE_DIR})
-        endif()
     endif()
+
+    if(BLAS_INCLUDE_DIRS)
+        include_directories(${BLAS_INCLUDE_DIRS})
+        message(STATUS "Found BLAS headers in: ${BLAS_INCLUDE_DIRS}")
+    else()
+        message(WARNING "Could NOT find cblas.h. Compilation might fail if headers are missing.")
+    endif()
+    message(STATUS "Found BLAS libraries: ${BLAS_LIBRARIES}")
+
 endif()
 
 # --- 5. define target module ---
