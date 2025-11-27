@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.15)
 project(pypresto LANGUAGES CXX)
 
-# --- 1. basic set ---
+# --- 1. Basic Set ---
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-# --- 2. find python environment ---
+# --- 2. Find Python Environment ---
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 execute_process(
@@ -14,41 +15,26 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-# --- 3. find openmp ---
+# --- 3. Find Openmp ---
 if(APPLE)
     find_program(BREW_CMD brew)
-    set(LIBOMP_PREFIX "")
     if(BREW_CMD)
         execute_process(COMMAND ${BREW_CMD} --prefix libomp
                 OUTPUT_VARIABLE LIBOMP_PREFIX
                 OUTPUT_STRIP_TRAILING_WHITESPACE)
-    endif()
-    if(NOT LIBOMP_PREFIX)
-        if(EXISTS "/opt/homebrew/opt/libomp")     # Apple Silicon
-            set(LIBOMP_PREFIX "/opt/homebrew/opt/libomp")
-        elseif(EXISTS "/usr/local/opt/libomp")    # Intel Mac
-            set(LIBOMP_PREFIX "/usr/local/opt/libomp")
+
+        if(LIBOMP_PREFIX)
+            message(STATUS "Found Homebrew OpenMP prefix: ${LIBOMP_PREFIX}")
+            list(APPEND CMAKE_PREFIX_PATH "${LIBOMP_PREFIX}")
         endif()
-    endif()
-    if(LIBOMP_PREFIX)
-        message(STATUS ">>> Found macOS OpenMP prefix: ${LIBOMP_PREFIX}")
-        include_directories("${LIBOMP_PREFIX}/include")
-        link_directories("${LIBOMP_PREFIX}/lib")
-        set(OpenMP_C_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
-        set(OpenMP_CXX_FLAGS "-Xpreprocessor -fopenmp -I${LIBOMP_PREFIX}/include")
-        set(OpenMP_C_LIB_NAMES "omp")
-        set(OpenMP_CXX_LIB_NAMES "omp")
-        set(OpenMP_omp_LIBRARY "${LIBOMP_PREFIX}/lib/libomp.dylib")
-    else()
-        message(WARNING ">>> Could NOT find libomp prefix! OpenMP linking might fail.")
     endif()
 endif()
 
-find_package(OpenMP)
+find_package(OpenMP REQUIRED)
 if(OpenMP_CXX_FOUND)
-    message(STATUS "OpenMP found. Parallel processing enabled.")
+    message(STATUS "OpenMP Found. Version: ${OpenMP_CXX_VERSION}")
 else()
-    message(WARNING "OpenMP NOT found. Will build single-threaded.")
+    message(FATAL_ERROR "OpenMP not found. Please install libomp (e.g., brew install libomp).")
 endif()
 
 # ---4. OpenBLAS setup ---
@@ -110,11 +96,13 @@ else()
 endif()
 
 # OpenMP
-if(OpenMP_CXX_FOUND)
-    target_link_libraries(matrix_module PRIVATE OpenMP::OpenMP_CXX)
-    if(APPLE AND LIBOMP_PREFIX)
-        target_link_libraries(matrix_module PRIVATE "${LIBOMP_PREFIX}/lib/libomp.dylib")
-    endif()
+target_link_libraries(matrix_module PRIVATE OpenMP::OpenMP_CXX)
+
+# compilation options
+if(MSVC)
+    target_compile_options(matrix_module PRIVATE /W3 /O2)
+else()
+    target_compile_options(matrix_module PRIVATE -O3 -Wall -fvisibility=hidden)
 endif()
 
 # macOS RPATH
@@ -125,16 +113,4 @@ if(APPLE)
     )
 endif()
 
-# compilation options
-if(MSVC)
-    target_compile_options(matrix_module PRIVATE /W3 /O2)
-else()
-    target_compile_options(matrix_module PRIVATE -O3 -Wall -fvisibility=hidden)
-endif()
-
 install(TARGETS matrix_module DESTINATION .)
-install(TARGETS matrix_module
-        LIBRARY DESTINATION .
-        ARCHIVE DESTINATION .
-        RUNTIME DESTINATION .
-)
