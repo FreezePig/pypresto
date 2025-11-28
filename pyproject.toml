@@ -32,13 +32,20 @@ BUILD_TESTING = "OFF"
 [tool.cibuildwheel]
 # skip PyPy and musllinux, only build CPython
 skip = ["pp*", "*-musllinux*"]
+build-verbosity = 1
+before-test = "pip install --only-binary=h5py h5py"
 test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
 
 [tool.cibuildwheel.linux]
-before-all = "yum install -y openblas-devel pkgconfig libgomp hdf5-devel"
+before-all = "yum install -y openblas-devel pkgconfig libgomp"
 
 [tool.cibuildwheel.macos]
-archs = ["x86_64", "arm64"]
-environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
-before-all = "brew install openblas libomp"
 repair-wheel-command = "delocate-listdeps {wheel} && delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
+
+[[tool.cibuildwheel.overrides]]
+select = "*-macosx_x86_64"
+environment = { MACOSX_DEPLOYMENT_TARGET = "13.0" }
+
+[[tool.cibuildwheel.overrides]]
+select = "*-macosx_arm64"
+environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
