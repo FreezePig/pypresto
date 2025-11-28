@@ -35,9 +35,10 @@ skip = ["pp*", "*-musllinux*"]
 test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
 
 [tool.cibuildwheel.linux]
-before-all = "yum install -y openblas-devel pkgconfig libgomp"
+before-all = "yum install -y openblas-devel pkgconfig libgomp hdf5-devel"
 
 [tool.cibuildwheel.macos]
 archs = ["x86_64", "arm64"]
+environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
 before-all = "brew install openblas libomp"
 repair-wheel-command = "delocate-listdeps {wheel} && delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
