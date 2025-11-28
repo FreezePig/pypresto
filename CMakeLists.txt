@@ -72,7 +72,7 @@ endif()
 
 # ---4. OpenBLAS setup ---
 if(WIN32)
-    # detect x64 or x86
+    # detect x64
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         set(OPENBLAS_ARCH_DIR "x64")
         message(STATUS "Building for Windows 64-bit")
