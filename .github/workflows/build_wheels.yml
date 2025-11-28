@@ -36,15 +36,22 @@ jobs:
       - name: Install cibuildwheel
         run: pip install cibuildwheel==2.21.3
 
+      - name: Configure macOS Environment
+        if: runner.os == 'macOS'
+        run: |
+          brew install libomp openblas
+          OMP_PREFIX=$(brew --prefix libomp)
+          BLAS_PREFIX=$(brew --prefix openblas)
+          echo "CFLAGS=-I$OMP_PREFIX/include -I$BLAS_PREFIX/include $CFLAGS" >> $GITHUB_ENV
+          echo "CXXFLAGS=-I$OMP_PREFIX/include -I$BLAS_PREFIX/include $CXXFLAGS" >> $GITHUB_ENV
+          echo "LDFLAGS=-L$OMP_PREFIX/lib -lomp -L$BLAS_PREFIX/lib -lopenblas $LDFLAGS" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$OMP_PREFIX;$BLAS_PREFIX;$CMAKE_PREFIX_PATH" >> $GITHUB_ENV
+
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
-          CIBW_ENVIRONMENT_MACOS: >
-            CFLAGS="-I$(brew --prefix libomp)/include $CFLAGS"
-            CXXFLAGS="-I$(brew --prefix libomp)/include $CXXFLAGS"
-            LDFLAGS="-L$(brew --prefix libomp)/lib -lomp $LDFLAGS"
-            CMAKE_PREFIX_PATH="$(brew --prefix libomp);$CMAKE_PREFIX_PATH"
+
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}-${{ matrix.arch }}

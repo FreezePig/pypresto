@@ -37,7 +37,7 @@ before-test = "pip install --only-binary=h5py h5py"
 test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
 
 [tool.cibuildwheel.linux]
-before-all = "yum install -y openblas-devel pkgconfig libgomp"
+before-all = "yum install -y epel-release && yum install -y openblas-devel pkgconfig libgomp"
 
 [tool.cibuildwheel.macos]
 repair-wheel-command = "delocate-listdeps {wheel} && delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
