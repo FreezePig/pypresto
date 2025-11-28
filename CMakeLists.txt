@@ -72,10 +72,18 @@ endif()
 
 # ---4. OpenBLAS setup ---
 if(WIN32)
-    set(OPENBLAS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/OpenBLAS")
+    # detect x64 or x86
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(OPENBLAS_ARCH_DIR "x64")
+        message(STATUS "Building for Windows 64-bit")
+    else()
+        message(FATAL_ERROR "Not supported currently: 32-bit Windows build.")
+    endif()
+
+    set(OPENBLAS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/OpenBLAS/${OPENBLAS_ARCH_DIR}")
     
     if(NOT EXISTS "${OPENBLAS_ROOT}")
-        message(FATAL_ERROR "Windows build requires external/OpenBLAS at: ${OPENBLAS_ROOT}")
+        message(FATAL_ERROR "OpenBLAS not found at: ${OPENBLAS_ROOT}. Please ensure external/OpenBLAS/x64 and x86 exist.")
     endif()
 
     include_directories("${OPENBLAS_ROOT}/include")
@@ -83,9 +91,16 @@ if(WIN32)
     
     # Try linking the static library libopenblas.a (if it exists) to avoid DLL dependencies.
     # If only .lib or .dll.a files are available, you will need to use delvewheel to fix them after packaging.
-    set(BLAS_LIBRARIES libopenblas)
+    find_library(BLAS_LIB
+            NAMES libopenblas openblas
+            PATHS "${OPENBLAS_ROOT}/lib"
+            NO_DEFAULT_PATH
+    )
+    if(NOT BLAS_LIB)
+        message(FATAL_ERROR "Could not find OpenBLAS library in ${OPENBLAS_ROOT}/lib")
+    endif()
+    set(BLAS_LIBRARIES ${BLAS_LIB})
 else()
-
     # 1. Find any BLAS library (OpenBLAS/MKL/Atlas etc.)
     # Using CMake FindBLAS.cmake
     find_package(BLAS REQUIRED)
@@ -110,7 +125,6 @@ else()
         message(WARNING "Could NOT find cblas.h. Compilation might fail if headers are missing.")
     endif()
     message(STATUS "Found BLAS libraries: ${BLAS_LIBRARIES}")
-
 endif()
 
 # --- 5. define target module ---
