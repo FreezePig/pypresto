@@ -35,7 +35,7 @@ BUILD_TESTING = "OFF"
 # skip PyPy and musllinux, only build CPython
 skip = ["pp*", "*-musllinux*", "*i686", "*-manylinux_aarch64"]
 build-verbosity = 1
-before-test = "pip install --only-binary=h5py h5py"
+before-test = "pip install --only-binary=h5py,scipy h5py scipy"
 test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
 
 [tool.cibuildwheel.linux]
