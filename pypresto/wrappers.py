@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import ctypes
 import numpy as np
-from typing import List
+from typing import List, Optional
 
 try:
     from . import matrix_module as mm
@@ -80,7 +80,7 @@ def standardiz_nthreads(nthreads: int) -> int:
         nthreads = -1
     return nthreads
 
-def validate_ndarray(name: str, arr, ndim: int | None = None) -> np.ndarray:
+def validate_ndarray(name: str, arr, ndim: Optional[int] = None) -> np.ndarray:
     """
     Validate that an input is a numpy array with optimal dimention check.
 
@@ -120,7 +120,7 @@ def validate_ndarray(name: str, arr, ndim: int | None = None) -> np.ndarray:
     
     return arr
 
-def validate_float_input(name: str, arr, ndim: int | None = None, 
+def validate_float_input(name: str, arr, ndim: Optional[int] = None, 
                          allow_empty: bool = False, allow_zero: bool = False) -> np.ndarray:
     """
     Validate a positive floating-point input array and coerce to np.float64.
@@ -179,7 +179,7 @@ def validate_float_input(name: str, arr, ndim: int | None = None,
     
     return arr
 
-def validate_output_buffer(name: str, arr, ndim: int | None = None) -> np.ndarray:
+def validate_output_buffer(name: str, arr, ndim: Optional[int] = None) -> np.ndarray:
     """
     Validate an output array that must already be a float64 numpy ndarray, 
     and if is contiguous and writeable.
@@ -219,7 +219,7 @@ def validate_output_buffer(name: str, arr, ndim: int | None = None) -> np.ndarra
         raise ValueError(f"Parameter '{name}' must be writable")
     return arr
 
-def validate_int_input(name: str, arr, ndim: int | None = None) -> np.ndarray:
+def validate_int_input(name: str, arr, ndim: Optional[int] = None) -> np.ndarray:
     """
     Validate an integer index array and coerce it to int32.
 
