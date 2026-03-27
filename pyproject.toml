@@ -2,7 +2,7 @@
 requires = [
     "scikit-build-core",
     "pybind11",
-    "numpy"
+    "numpy>=2.0.0"
 ]
 build-backend = "scikit_build_core.build"
 
@@ -12,7 +12,7 @@ version = "0.1.0"
 
 requires-python = ">=3.8"
 dependencies = [
-    "numpy",
+    "numpy>=2.0.0",
     "pandas",
     "anndata",
     "scipy",

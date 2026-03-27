@@ -24,6 +24,342 @@ integer_dtypes = {
     np.dtype('int8'), np.dtype('int16'), np.dtype('int32'), np.dtype('int64')
 }
 
+def validate_int_scalar(name: str, value, *, positive: bool = False) -> int:
+    """
+    Validate a parameter is a Python integer and satisfies
+    optional range constraints.
+
+    Parameters
+    ----------
+    name : str
+        Name of Parameter (used in error messages).
+    value : any
+        Value to validate.
+    positive : bool, optional
+        If True, value must be positive (greater than 0). Default is False.
+
+    Returns
+    -------
+    int
+        The validated integer value.
+    Raises
+    ------
+    TypeError
+        If value is not an integer.
+    ValueError
+        If value does not satisfy range constraints.
+    """
+    if not isinstance(value, int):
+        raise TypeError(f"Parameter '{name}' must be an integer, got {type(value)}")
+
+    if positive and value <= 0:
+        raise ValueError(f"Parameter '{name}' must be positive, got {value}")
+    
+    return value
+
+def standardiz_nthreads(nthreads: int) -> int:
+    """
+    Validate and Standardize the nthreads parameter.
+
+    Parameters
+    ----------
+    nthreads : int
+        Number of threads to use for computation. Must be positive. If nthreads <= 0,
+        will use all available threads (nthreads=-1).
+
+    Returns
+    -------
+    int
+        A standardized thread count:
+        - positive integer: use that many threads
+        - -1: use all available threads
+
+    """
+    nthreads = validate_int_scalar('nthreads', nthreads)
+    if nthreads <= 0:
+        nthreads = -1
+    return nthreads
+
+def validate_ndarray(name: str, arr, ndim: int | None = None) -> np.ndarray:
+    """
+    Validate that an input is a numpy array with optimal dimention check.
+
+    Parameters
+    ----------
+    name : str
+        Name of the parameter (used in error messages).
+    arr : Any
+        Object to validate
+    ndim : int or None, optional
+        Expected number of dimensions. If None, any number of dimensions is accepted.
+        Default is None.
+    
+    Returns
+    ----------
+    np.ndarray
+        The validated numpy array.
+
+    Raises
+    ----------
+    TypeError
+        If the input is not a numpy array.
+    ValueError
+        If dim of array not match ndim.
+    """
+    if not isinstance(name, str):
+        raise TypeError(f"Parameter 'name' must be a string, got {type(name)}")
+    
+    if ndim is not None and not isinstance(ndim, int):
+        raise TypeError(f"Parameter 'ndim' must be an integer or None, got {type(ndim)}")
+    
+    if not isinstance(arr, np.ndarray):
+        raise TypeError(f"Parameter '{name}' must be a numpy array, got {type(arr)}")
+    
+    if ndim is not None and arr.ndim != ndim:
+        raise ValueError(f"Parameter '{name}' must be {ndim}-dimensional, got {arr.ndim}D")
+    
+    return arr
+
+def validate_float_input(name: str, arr, ndim: int | None = None, 
+                         allow_empty: bool = False, allow_zero: bool = False) -> np.ndarray:
+    """
+    Validate a positive floating-point input array and coerce to np.float64.
+
+    Parameters
+    ----------
+    name : str
+        Name of the parameter (used in error messages).
+    arr : Any
+        Input object to validate
+    ndim : int or None, optional
+        Expected number of dimensions. If None, any number of dimensions is accepted.
+        Default is None.
+    allow_empty : bool, optional
+        If False, the array cannot be empty. Default is False.
+    allow_zero : bool, optional
+        If False, the array cannot contain zero values. Default is False.
+    
+    Returns
+    ----------
+    np.ndarray
+        The validated and coerced numpy array with dtype np.float64.
+
+    Raises
+    ----------
+    TypeError
+        If the input is not a numpy array or cannot be coerced to float.
+    ValueError
+        If the array is empty (when allow_empty=False); does not match expected dimensions;
+        contains non-positive values
+    """
+    arr = validate_ndarray(name, arr, ndim = ndim)
+
+    if not np.issubtype(arr.dtype, np.floating):
+        raise TypeError(f"Parameter '{name}' must be a floating-point array, got dtype {arr.dtype}")
+    
+    if not allow_empty and arr.size == 0:
+        raise ValueError(f"Parameter '{name}' cannot be an empty array")
+
+    min_val = np.min(arr)
+    if allow_zero:
+        if min_val < 0:
+            raise ValueError(
+                f"All elements in '{name}' must be non-negative (greater than or equal to 0), "
+                f"but found minimum value: {min_val}"
+            )
+    else:
+        if min_val <= 0:
+            raise ValueError(
+                f"All elements in '{name}' must be positive (greater than 0), "
+                f"but found minimum value: {min_val}"
+            )
+
+    if arr.dtype != np.float64:
+        arr = arr.astype(np.float64)
+    
+    return arr
+
+def validate_output_buffer(name: str, arr, ndim: int | None = None) -> np.ndarray:
+    """
+    Validate an output array that must already be a float64 numpy ndarray, 
+    and if is contiguous and writeable.
+
+    Parameters
+    ----------
+    name : str
+        Parameter name used in error messages.
+    arr : Any
+        Output array to validate.
+    ndim : int or None, default None
+        Expected number of dimensions.
+
+    Returns
+    -------
+    np.ndarray
+        The validated float64 numpy array.
+
+    Raises
+    ------
+    TypeError
+        If arr is not a numpy array or does not have dtype float64.
+    ValueError
+        If ndim does not match.
+    """
+    arr = validate_ndarray(name, arr, ndim=ndim)
+
+    if arr.dtype != np.float64:
+        raise TypeError(
+            f"Parameter '{name}' must have dtype float64, got {arr.dtype}"
+        )
+    
+    #  --- Contiguity and writeability ---
+    if not arr.flags['C_CONTIGUOUS']:
+        raise ValueError(f"Parameter '{name}' must be a contiguous array")
+    if not arr.flags['WRITEABLE']:
+        raise ValueError(f"Parameter '{name}' must be writable")
+    return arr
+
+def validate_int_input(name: str, arr, ndim: int | None = None) -> np.ndarray:
+    """
+    Validate an integer index array and coerce it to int32.
+
+    Parameters
+    ----------
+    name : str
+        Parameter name used in error messages.
+    arr : Any
+        Input array to validate.
+    ndim : int, default 1
+        Expected number of dimensions.
+
+    Raises
+    ------
+    TypeError
+        If the input is not a numpy array or does not have an integer dtype.
+    """
+    arr = validate_ndarray(name, arr, ndim=ndim)
+
+    if arr.dtype not in integer_dtypes:
+        raise TypeError(
+            f"Parameter '{name}' must have an integer dtype (uint8/int8/uint16/int16/uint32/int32/uint64/int64), "
+            f"got {arr.dtype}"
+        )
+    
+    if arr.dtype != np.int32:
+        arr = arr.astype(np.int32)
+    
+    return arr
+
+def validate_spmatrix_input(x: np.ndarray, 
+                            p: np.ndarray, 
+                            i: np.ndarray,
+                            groups: np.ndarray,
+                            ngroups: int,
+                            nrow: int,
+                            ncol: int,
+                            cell_num: int,
+                            matrix_type: str = 'csc') -> None:
+    """
+    Validate the input arrays and parameters for sparse matrix operations.
+    Inludes length checks, value range checks, and format checks for CSC/CSR matrices.
+
+    Parameters
+    ----------
+    x : np.ndarray
+        1D array of non-zero values in the sparse matrix.
+    p : np.ndarray
+        indptr array for CSC/CSR format.
+    i : np.ndarray
+        indices corresponding to each non-zero value in x.
+    ngroups: int
+        Total number of groups. Must be positive.
+    nrow : int
+        Number of rows in the sparse matrix.
+    ncol : int
+        Number of columns in the sparse matrix.
+    cell_num : int
+        Number of non-zero cells in the sparse matrix.
+    matrix_type : str, default 'csc'
+        Type of sparse matrix format (either 'csc' or 'csr').
+
+    Raises
+    ------
+    TypeError
+        If any of the inputs are of incorrect type.
+    ValueError
+        If any of the inputs are of incorrect value.
+    """
+
+    # Basic type and dimension checks
+    if len(x) != len(i):
+        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
+                        f"got x: {len(x)}, i: {len(i)}")
+    
+    if p[0] != 0:
+        raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
+    if p[-1] != len(x):
+        raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
+                        f"got {p[-1]}")
+    if not np.all(np.diff(p) >= 0):
+        raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    
+    if len(groups) != cell_num:
+        raise ValueError(f"Array 'groups' must have length equal to number of rows ({cell_num}), "
+                        f"got {len(groups)}")
+    if np.max(groups) >= ngroups:
+        raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
+                         f"found maximum group index: {np.max(groups)}")
+    
+    if matrix_type == 'csc':
+        if np.max(i) >= nrow:
+            raise ValueError(f"Row indices in 'i' must be in range [0, {nrow-1}], "
+                             f"found maximum row index: {np.max(i)}")
+        if len(p) != ncol + 1:
+            raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
+                            f"got {len(p)}")
+    elif matrix_type == 'csr':
+        if np.max(i) >= ncol:
+            raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
+                             f"found maximum column index: {np.max(i)}")
+        if len(p) != nrow + 1:
+            raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
+                            f"got {len(p)}")
+    else:
+        raise TypeError(f"Invalid matrix_type '{matrix_type}'. Expected 'csc' or 'csr'.")    
+
+def validate_denmatrix_input(
+    groups: np.ndarray,
+    ngroups: int,
+    cell_num: int
+) -> None:
+    """
+    Validate the input arrays and parameters for dense matrix operations.
+    Inludes length checks, value range checks, and format checks for dense matrices.
+
+    Parameters
+    ----------
+    groups : np.ndarray
+        1D array indicating group membership for rows or columns.
+    ngroups : int
+        Total number of groups. Must be positive.
+    cell_num : int
+        Number of rows or columns in the dense matrix (depending on grouping).
+
+    Raises
+    ------
+    TypeError
+        If any of the inputs are of incorrect type.
+    ValueError
+        If any of the inputs are of incorrect value.
+    """
+
+    if len(groups) != cell_num:
+        raise ValueError(f"Array 'groups' must have length equal to number of rows/columns ({cell_num}), "
+                        f"got {len(groups)}")
+    if np.max(groups) >= ngroups:
+        raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
+                         f"found maximum group index: {np.max(groups)}")
+
 def sumGroups_csc(
     x: np.ndarray,
     p: np.ndarray,
@@ -72,107 +408,21 @@ def sumGroups_csc(
         group and column combination (dtype: float64).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1, allow_empty=False)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
     
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(x) != len(i):
-        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
-                        f"got x: {len(x)}, i: {len(i)}")
-    
-    if len(p) != ncol + 1:
-        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
-                        f"got {len(p)}")
-    
-    if len(x) == 0:
-        raise ValueError("Array 'x' cannot be empty")
-    
-    # Data type validation for integer arrays
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    # Check integer dtypes (allow uint64, int64, uint32, int32)
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have integer dtype (uint64/int64/uint32/int32), got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have integer dtype (uint64/int64/uint32/int32), got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Ensure x are positive
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                         f"but found minimum value: {min_val}")
-    
-    # Value range validation
-    if len(groups) != nrow:
-        raise ValueError(f"Array 'groups' must have length equal to number of rows ({nrow}), "
-                        f"got {len(groups)}")
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                             f"found maximum group index: {max_group}")
-    
-    if len(i) > 0:
-        max_row = np.max(i)
-        if max_row >= len(groups):
-            raise ValueError(f"Row indices in 'i' must be in range [0, {len(groups)-1}], "
-                             f"found maximum row index: {max_row}")
-    
-    # Validate CSC format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        
-        if p[-1] != len(x):
-            raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
-                           f"got {p[-1]}")
-        
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    # csc matrix validation
+    validate_spmatrix_input(x, p, i, groups, ngroups,
+                            nrow, ncol, cell_num=nrow, matrix_type='csc')
     
     # Call the C++ function
     try:
@@ -228,104 +478,21 @@ def sumGroups_csr(
         group and column combination (dtype: float64).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
+
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
     
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(x) != len(i):
-        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
-                        f"got x: {len(x)}, i: {len(i)}")
-    
-    if len(p) != nrow + 1:
-        raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
-                        f"got {len(p)}")
-    
-    if len(groups) != nrow:
-        raise ValueError(f"Array 'groups' must have length nrow = {nrow}, "
-                        f"got {len(groups)}")
-    
-    if len(x) == 0:
-        raise ValueError("Array 'x' cannot be empty")
-    
-    # Data type validation for integer arrays
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-
-    # Check integer dtypes (allow uint64, int64, uint32, int32)
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have dtype in {integer_dtypes}, got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have dtype in {integer_dtypes}, got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have dtype in {integer_dtypes}, got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Ensure x are positive
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                         f"but found minimum value: {min_val}")
-    
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                             f"found maximum group index: {max_group}")
-    if len(i) > 0:
-        max_col = np.max(i)
-        if max_col >= ncol:
-            raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
-                             f"found maximum column index: {max_col}")
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        
-        if p[-1] != len(x):
-            raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
-                           f"got {p[-1]}")
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSR format)")
+    # csr matrix validation
+    validate_spmatrix_input(x, p, i, groups, ngroups,
+                            nrow, ncol, cell_num=nrow, matrix_type='csr')
     
     # Call the C++ function
     try:
@@ -383,108 +550,21 @@ def sumGroups_csc_T(
         group and row combination (dtype: float64).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
+
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(x) != len(i):
-        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
-                        f"got x: {len(x)}, i: {len(i)}")
-    
-    if len(p) != ncol + 1:
-        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
-                        f"got {len(p)}")
-    
-    if len(groups) != ncol:
-        raise ValueError(f"Array 'groups' must have length ncol = {ncol}, "
-                        f"got {len(groups)}")
-    
-    if len(x) == 0:
-        raise ValueError("Array 'x' cannot be empty")
-    
-    # Data type validation for integer arrays
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    # Check integer dtypes (allow uint64, int64, uint32, int32)
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have integer dtype (uint64/int64/uint32/int32), got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have integer dtype (uint64/int64/uint32/int32), got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Ensure all elements in x are positive (greater than 0)
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                        f"but found minimum value: {min_val}")
-    
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_group}")
-    
-    if len(i) > 0:
-        max_row = np.max(i)
-        if max_row >= nrow:
-            raise ValueError(f"Row indices in 'i' must be in range [0, {nrow-1}], "
-                           f"found maximum row index: {max_row}")
-    
-    # Validate CSC format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        
-        if p[-1] != len(x):
-            raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
-                           f"got {p[-1]}")
-        
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    # csc matrix validation
+    validate_spmatrix_input(x, p, i, groups, ngroups,
+                            nrow, ncol, cell_num=ncol, matrix_type='csc')
     
     # Call the C++ function
     try:
@@ -544,104 +624,21 @@ def sumGroups_csr_T(
         group and row combination (dtype: float64).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
     
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
     
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(x) != len(i):
-        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
-                        f"got x: {len(x)}, i: {len(i)}")
-    if len(p) != nrow + 1:
-        raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
-                        f"got {len(p)}")
-    if len(x) == 0:
-        raise ValueError("Array 'x' cannot be empty")
-    
-    # Data type validation for integer arrays
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-
-    # Check integer dtypes (allow uint64, int64, uint32, int32)
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have integer dtype (uint64/int64/uint32/int32), got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have integer dtype (uint64/int64/uint32/int32), got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Ensure all elements in x are positive (greater than 0)
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                        f"but found minimum value: {min_val}")
-    
-    # Value range validation
-    if len(groups) != ncol:
-        raise ValueError(f"Array 'groups' must have length equal to number of columns ({ncol}), "
-                        f"got {len(groups)}")
-    if len(groups) > 0:
-        max_groups = np.max(groups)
-        if max_groups >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_groups}")
-    if len(i) > 0:
-        max_col = np.max(i)
-        if max_col >= ncol:
-            raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
-                           f"found maximum column index: {max_col}")
-    
-    # Validate CSR format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        
-        if p[-1] != len(x):
-            raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
-                           f"got {p[-1]}")
-        
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSR format)")
+    # validate csr matrix
+    validate_spmatrix_input(x, p, i, groups, ngroups,
+                            nrow, ncol, cell_num=ncol, matrix_type='csr')
     
     # Call the C++ function
     try:
@@ -678,57 +675,16 @@ def sumGroups_dense(
         2D array of shape (ngroups, ncols) containing the sum of values for each
         group and column combination (dtype: float64).
     """
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    
-    # calar parameter validation
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    
-    # Array dimension validation
-    if x.ndim != 2:
-        raise ValueError(f"Parameter 'x' must be 2-dimensional, got {x.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    nrows, ncols = x.shape
-    if nrows == 0 or ncols == 0:
-        raise ValueError("Input matrix 'x' cannot be empty")
-    
-    # Array length validation
-    if len(groups) != nrows:
-        raise ValueError(f"Array 'groups' must have length equal to number of rows ({nrows}), "
-                        f"got {len(groups)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=2, allow_zero=True)
+    groups = validate_int_input('groups', groups, ndim=1)
 
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-        
-    # Check integer dtypes for groups (allow uint64, int64, uint32, int32)
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    groups = groups.astype(np.int32)
+    # scalar parameter validation
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
 
-    # Ensure all elements in x are non-negative
-    if np.any(x < 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be non-negative, "
-                        f"but found minimum value: {min_val}")
-    
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_group}")
+    # validate dense matrix
+    nrows, _ = x.shape
+    validate_denmatrix_input(groups, ngroups, cell_num=nrows)
         
     # Call the C++ function
     try:
@@ -769,57 +725,16 @@ def sumGroups_dense_T(
         group and row combination (dtype: float64).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=2, allow_zero=True)
+    groups = validate_int_input('groups', groups, ndim=1)
     
     # Scalar parameter validation
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    
-    # Array dimension validation
-    if x.ndim != 2:
-        raise ValueError(f"Parameter 'x' must be 2-dimensional, got {x.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    nrows, ncols = x.shape
-    if nrows == 0 or ncols == 0:
-        raise ValueError("Input matrix 'x' cannot be empty")
-    
-    # Array length validation
-    if len(groups) != ncols:
-        raise ValueError(f"Array 'groups' must have length equal to number of columns ({ncols}), "
-                        f"got {len(groups)}")
-    
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
 
-    # Check integer dtypes for groups (allow uint64, int64, uint32, int32)
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    groups = groups.astype(np.int32)
-
-    # Ensure all elements in x are non-negative
-    if np.any(x < 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be non-negative, "
-                        f"but found minimum value: {min_val}")
-    
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_group}")
+    # validate dense matrix
+    _, ncols = x.shape
+    validate_denmatrix_input(groups, ngroups, cell_num=ncols)
         
     # Call the C++ function
     try:
@@ -872,83 +787,20 @@ def nnzeroGroups_csc(
         group and column combination (dtype: int32).
     """
 
-    # Type validation
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
+    # Array parameter validation
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
     
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
     
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Array dimension validation
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(p) != ncol + 1:
-        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
-                        f"got {len(p)}")
-    if len(groups) != nrow:
-        raise ValueError(f"Array 'groups' must have length equal to number of rows ({nrow}), "
-                         f"got {len(groups)}")
-    # Get the number of non-zero elements
-    nnz = p[-1] if len(p) > 0 else 0
-    if len(i) != nnz:
-        raise ValueError(f"Array 'i' must have length equal to number of non-zero elements ({nnz}), "
-                        f"got {len(i)}")
-    
-    # Data type validation for integer arrays
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have integer dtype (uint64/int64/uint32/int32), got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have integer dtype (uint64/int64/uint32/int32), got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_group}")
-    if len(i) > 0:
-        max_row = np.max(i)
-        if max_row >= len(groups):
-            raise ValueError(f"Row indices in 'i' must be in range [0, {len(groups)-1}], "
-                           f"found maximum row index: {max_row}")
-    
-    # Validate CSC format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    # csc matrix validation
+    validate_spmatrix_input(np.zeros(len(i), dtype=np.float64), p, i, groups,
+                            ngroups, nrow, ncol, cell_num=nrow, matrix_type='csc')
 
     # Call the C++ function
     try:
@@ -994,81 +846,20 @@ def nnzeroGroups_csr(
         Number of threads to use for computation. Must be positive. Default is 1.
     """
 
-    # Type validation
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
+    # Array parameter validation
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
     
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
     
-    # Scalar value validation
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-
-    # Array dimension validation
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(p) != nrow + 1:
-        raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
-                        f"got {len(p)}")
-    if len(groups) != nrow:
-        raise ValueError(f"Array 'groups' must have length nrow = {nrow}, "
-                        f"got {len(groups)}")
-    # Get the number of non-zero elements
-    nnz = p[-1] if len(p) > 0 else 0
-    if len(i) != nnz:
-        raise ValueError(f"Array 'i' must have length equal to number of non-zero elements ({nnz}), "
-                        f"got {len(i)}")
-    
-    # Data type validation for integer arrays
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have dtype in {integer_dtypes}, got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have dtype in {integer_dtypes}, got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have dtype in {integer_dtypes}, got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                             f"found maximum group index: {max_group}")
-    if len(i) > 0:
-        max_col = np.max(i)
-        if max_col >= ncol:
-            raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
-                             f"found maximum column index: {max_col}")
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSR format)")
+    # csr matrix validation
+    validate_spmatrix_input(np.zeros(len(i), dtype=np.float64), p, i, groups,
+                            ngroups, nrow, ncol, cell_num=nrow, matrix_type='csr')
     
     # Call the C++ function
     try:
@@ -1121,81 +912,20 @@ def nnzeroGroups_csc_T(
         2D array of shape (ngroups, nrow) containing the count of non-zero elements for each
         group and row combination (dtype: int32).
     """
-    # Type validation
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    
-    # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Array dimension validation
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    if len(p) != ncol + 1:
-        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
-                        f"got {len(p)}")
-    # Get the number of non-zero elements
-    nnz = p[-1] if len(p) > 0 else 0
-    if len(i) != nnz:
-        raise ValueError(f"Array 'i' must have length equal to number of non-zero elements ({nnz}), "
-                        f"got {len(i)}")
-    if len(groups) != ncol:
-        raise ValueError(f"Array 'groups' must have length equal to number of columns ({ncol}), "
-                        f"got {len(groups)}")
-    
-    # Data type validation for integer arrays
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have integer dtype (uint64/int64/uint32/int32), got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have integer dtype (uint64/int64/uint32/int32), got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
+    # Array parameter validation
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
 
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_group}")
-    if len(i) > 0:
-        max_row = np.max(i)
-        if max_row >= nrow:
-            raise ValueError(f"Row indices in 'i' must be in range [0, {nrow-1}], "
-                           f"found maximum row index: {max_row}")
-    
-    # Validate CSC format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    # Scalar parameter validation
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
+
+    # validate csc matrix
+    validate_spmatrix_input(np.zeros(len(i), dtype=np.float64), p, i, groups,
+                            ngroups, nrow, ncol, cell_num=ncol, matrix_type='csc')
         
     # Call the C++ function
     try:
@@ -1250,80 +980,20 @@ def nnzeroGroups_csr_T(
         group and row combination (dtype: int32).
     """
 
-    # Type validation
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    
+    # Array parameter validation
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
+
     # Scalar parameter validation
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
     
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-
-    # Array dimension validation
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Array length validation
-    nnz = p[-1] if len(p) > 0 else 0
-    if len(i) != nnz:
-        raise ValueError(f"Array 'i' must have length equal to number of non-zero elements ({nnz}), "
-                        f"got {len(i)}")
-    if len(p) != nrow + 1:
-        raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
-                        f"got {len(p)}")
-    if len(groups) != ncol:
-        raise ValueError(f"Array 'groups' must have length equal to number of columns ({ncol}), "
-                        f"got {len(groups)}")
-    
-    # Data type validation for integer arrays
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have integer dtype (uint64/int64/uint32/int32), got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have integer dtype (uint64/int64/uint32/int32), got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have integer dtype (uint64/int64/uint32/int32), got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices must be in range [0, {ngroups-1}], "
-                           f"found maximum group index: {max_group}")
-    if len(i) > 0:
-        max_col = np.max(i)
-        if max_col >= ncol:
-            raise ValueError(f"Row indices in 'i' must be in range [0, {ncol-1}], "
-                           f"found maximum row index: {max_col}")
-        
-    # Validate CSR format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSR format)")
+    # validate csr matrix
+    validate_spmatrix_input(np.zeros(len(i), dtype=np.float64), p, i, groups,
+                            ngroups, nrow, ncol, cell_num=ncol, matrix_type='csr')
         
     # Call the C++ function
     try:
@@ -1366,56 +1036,18 @@ def nnzeroGroups_dense(
         is the count of non-zero entries in column `c` among rows assigned to group `g`.
     """
 
-    # --- Type validation ---
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=2, allow_zero=True)
+    groups = validate_int_input('groups', groups, ndim=1)
+
     # --- Scalar validation ---
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    # --- Array dimension validation ---
-    if x.ndim != 2:
-        raise ValueError(f"Parameter 'x' must be 2-dimensional, got {x.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    nrows, ncols = x.shape
-    if nrows == 0 or ncols == 0:
-        raise ValueError(f"Input matrix 'x' must have at least one row and one column, got shape {x.shape}")
+    # validate dense matrix
+    nrows, _ = x.shape
+    validate_denmatrix_input(groups, ngroups, cell_num=nrows)
 
-    if len(groups) != nrows:
-        raise ValueError(f"Length of 'groups' ({len(groups)}) must equal number of rows in 'x' ({nrows})")
-    
-    # --- Data type validation ---
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have an integer dtype in {integer_dtypes}, got {groups.dtype}")
-    groups = groups.astype(np.int32)
-
-    # --- Ensure all elements in x are non-negative ---
-    if np.any(x < 0):
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be non-negative, "
-                         f"but found minimum value: {min_val}")
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices in 'groups' must be in range [0, {ngroups-1}], "
-                             f"found maximum group index: {max_group}")
     # Call the C++ function
     try:
         result = mm.cpp_nnzeroGroups_dense(x, groups, ngroups, nthreads)
@@ -1458,55 +1090,16 @@ def nnzeroGroups_dense_T(
     """
 
     # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    if not isinstance(ngroups, int):
-        raise TypeError(f"Parameter 'ngroups' must be an integer, got {type(ngroups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
+    x = validate_float_input('x', x, ndim=2, allow_zero=True)
+    groups = validate_int_input('groups', groups, ndim=1)
+
     # Scalar parameter validation
-    if ngroups <= 0:
-        raise ValueError(f"Parameter 'ngroups' must be positive, got {ngroups}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # --- Array dimension validation ---
-    if x.ndim != 2:
-        raise ValueError(f"Parameter 'x' must be 2-dimensional, got {x.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    nrows, ncols = x.shape
-    if nrows == 0 or ncols == 0:
-        raise ValueError(f"Input matrix 'x' must have at least one row and one column, got shape {x.shape}")
+    ngroups = validate_int_scalar('ngroups', ngroups, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    if len(groups) != ncols:
-        raise ValueError(f"Length of 'groups' ({len(groups)}) must equal number of columns in 'x' ({ncols})")
-    
-    # --- Data type validation ---
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have an integer dtype in {integer_dtypes}, got {groups.dtype}")
-    groups = groups.astype(np.int32)
-
-    # --- Ensure all elements in x are non-negative ---
-    if np.any(x < 0):
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be non-negative, "
-                         f"but found minimum value: {min_val}")
-    # Value range validation
-    if len(groups) > 0:
-        max_group = np.max(groups)
-        if max_group >= ngroups:
-            raise ValueError(f"Group indices in 'groups' must be in range [0, {ngroups-1}], "
-                             f"found maximum group index: {max_group}")
+    # validate dense matrix
+    _, ncols = x.shape
+    validate_denmatrix_input(groups, ngroups, cell_num=ncols)
         
     # --- Call C++ backend ---
     try:
@@ -1542,6 +1135,9 @@ def rank_matrix_csc(
     p : np.ndarray
         1D array of column pointers in CSC format (dtype: int32 or int64).
         Length must be `ncol + 1`, with `p[0] == 0` and non-decreasing.
+    rank_data_out : np.ndarray
+        1D output array to store tie group sizes and zero counts (dtype: float64).
+        Must be writable, C-contiguous, and have same length as `x`.
     nrow : int
         Number of rows in the matrix. Must be positive.
     ncol : int
@@ -1569,84 +1165,31 @@ def rank_matrix_csc(
     - Input arrays must be contiguous and writable.
     """
 
-    # --- Type validation ---
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(rank_data_out, np.ndarray):
-        raise TypeError(f"Parameter 'rank_data_out' must be a numpy array, got {type(rank_data_out)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    rank_data_out = validate_output_buffer('rank_data_out', rank_data_out, ndim=1)
     
     # Scalar parameter validation
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
     
-    # --- Scalar validation ---
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # ---Array dimension validation ---
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if rank_data_out.ndim != 1:
-        raise ValueError(f"Parameter 'rank_data_out' must be 1-dimensional, got {rank_data_out.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    
-    # Array length validation
-    if len(p) != ncol + 1:
-        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
-                        f"got {len(p)}")
-    
-    # ---Data type validation ---
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-
-    if rank_data_out.dtype != np.float64:
-        raise TypeError(f"Array 'rank_data_out' must have dtype float64, got {rank_data_out.dtype}")
-    
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have dtype int32 or int64, got {p.dtype}")
-    p = p.astype(np.int32)
-
-    # --- Contiguity and writability ---
-    if not rank_data_out.flags['C_CONTIGUOUS']:
-        raise ValueError("Array 'rank_data_out' must be C-contiguous")
-    if not rank_data_out.flags['WRITEABLE']:
-        raise ValueError("Array 'rank_data_out' must be writable (will be modified in-place)")
-    
-    # Array length validation
+    # validate csc matrix
     if len(x) != len(rank_data_out):
         raise ValueError(f"Array 'rank_data_out' must have the same length as 'x' ({len(x)}), "
                          f"got {len(rank_data_out)}")
-    
-    # Ensure x are positive
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                         f"but found minimum value: {min_val}")
-    
-    # Validate CSC format constraints
-    if len(p) > 0 and p[0] != 0:
+
+    if p[0] != 0:
         raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-    
-    if len(p) > 0 and p[-1] != len(x):
-        raise ValueError(f"Array 'x' must have length equal to number of non-zeros ({p[-1]}), "
-                         f"got {len(x)}")
-    
+    if p[-1] != len(x):
+        raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
+                        f"got {p[-1]}")
     if not np.all(np.diff(p) >= 0):
         raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    if len(p) != ncol + 1:
+        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
+                        f"got {len(p)}")
     
     # Call the C++ function
     try:
@@ -1717,98 +1260,39 @@ def rank_matrix_csr(
       It is ordered column by column (like CSC `data`), not row by row (like CSR `data`).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(rank_data_out, np.ndarray):
-        raise TypeError(f"Parameter 'rank_data_out' must be a numpy array, got {type(rank_data_out)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    rank_data_out = validate_output_buffer('rank_data_out', rank_data_out, ndim=1)
 
     # Scalar parameter validation
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    # Scalar value validation
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if rank_data_out.ndim != 1:
-        raise ValueError(f"Parameter 'rank_data_out' must be 1-dimensional, got {rank_data_out.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-        
-    if rank_data_out.dtype != np.float64:
-        raise TypeError(f"Array 'rank_data_out' must have dtype float64, got {rank_data_out.dtype}")
-
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have dtype int32 or int64, got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have dtype int32 or int64, got {i.dtype}")
-    p, i = p.astype(np.int32), i.astype(np.int32)
-
-    # Contiguity and writability of output
-    if not rank_data_out.flags['C_CONTIGUOUS']:
-        raise ValueError("Array 'rank_data_out' must be C-contiguous")
-    if not rank_data_out.flags['WRITEABLE']:
-        raise ValueError("Array 'rank_data_out' must be writable (will be modified in-place)")
-    
-    # Array length validation
+    # validate csr matrix
+    if len(x) != len(i):
+        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
+                        f"got x: {len(x)}, i: {len(i)}")
     if len(x) != len(rank_data_out):
         raise ValueError(f"Array 'rank_data_out' must have the same length as 'x' ({len(x)}), "
                          f"got {len(rank_data_out)}")
-    if len(x) != len(i):
-        raise ValueError(f"Array 'i' must have the same length as 'x' ({len(x)}), "
-                         f"got {len(i)}")
+    
+    if p[0] != 0:
+        raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
+    if p[-1] != len(x):
+        raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
+                        f"got {p[-1]}")
+    if not np.all(np.diff(p) >= 0):
+        raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
     if len(p) != nrow + 1:
         raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
-                         f"got {len(p)}")
-    if len(x) == 0:
-        raise ValueError("Array 'x' must not be empty")
-    
-    # Ensure x are positive
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                         f"but found minimum value: {min_val}")
-    # Value range validation
-    if len(i) > 0:
-        max_col = np.max(i)
-        if max_col >= ncol:
-            raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
-                             f"found maximum column index: {max_col}")
-    # Validate CSR format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        if p[-1] != len(x):
-            raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
-                           f"got {p[-1]}")
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSR format)")
+                        f"got {len(p)}")
+
+    if np.max(i) >= ncol:
+        raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
+                            f"found maximum column index: {np.max(i)}")
     
     # Call the C++ function
     try:
@@ -1879,98 +1363,39 @@ def rank_matrix_csr_(
       It is ordered column by column (like CSC `data`), not row by row (like CSR `data`).
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(rank_data_out, np.ndarray):
-        raise TypeError(f"Parameter 'rank_data_out' must be a numpy array, got {type(rank_data_out)}")
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    rank_data_out = validate_output_buffer('rank_data_out', rank_data_out, ndim=1)
 
     # Scalar parameter validation
-    if not isinstance(nrow, int):
-        raise TypeError(f"Parameter 'nrow' must be an integer, got {type(nrow)}")
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    # Scalar value validation
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if rank_data_out.ndim != 1:
-        raise ValueError(f"Parameter 'rank_data_out' must be 1-dimensional, got {rank_data_out.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-        
-    if rank_data_out.dtype != np.float64:
-        raise TypeError(f"Array 'rank_data_out' must have dtype float64, got {rank_data_out.dtype}")
-
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have dtype int32 or int64, got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have dtype int32 or int64, got {i.dtype}")
-    p, i = p.astype(np.int32), i.astype(np.int32)
-
-    # Contiguity and writability of output
-    if not rank_data_out.flags['C_CONTIGUOUS']:
-        raise ValueError("Array 'rank_data_out' must be C-contiguous")
-    if not rank_data_out.flags['WRITEABLE']:
-        raise ValueError("Array 'rank_data_out' must be writable (will be modified in-place)")
-    
-    # Array length validation
+    # validate csr matrix
+    if len(x) != len(i):
+        raise ValueError(f"Arrays 'x' and 'i' must have the same length, "
+                        f"got x: {len(x)}, i: {len(i)}")
     if len(x) != len(rank_data_out):
         raise ValueError(f"Array 'rank_data_out' must have the same length as 'x' ({len(x)}), "
                          f"got {len(rank_data_out)}")
-    if len(x) != len(i):
-        raise ValueError(f"Array 'i' must have the same length as 'x' ({len(x)}), "
-                         f"got {len(i)}")
+    
+    if p[0] != 0:
+        raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
+    if p[-1] != len(x):
+        raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
+                        f"got {p[-1]}")
+    if not np.all(np.diff(p) >= 0):
+        raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
     if len(p) != nrow + 1:
         raise ValueError(f"Array 'p' must have length nrow + 1 = {nrow + 1}, "
-                         f"got {len(p)}")
-    if len(x) == 0:
-        raise ValueError("Array 'x' must not be empty")
-    
-    # Ensure x are positive
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                         f"but found minimum value: {min_val}")
-    # Value range validation
-    if len(i) > 0:
-        max_col = np.max(i)
-        if max_col >= ncol:
-            raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
-                             f"found maximum column index: {max_col}")
-    # Validate CSR format constraints
-    if len(p) > 0:
-        if p[0] != 0:
-            raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-        if p[-1] != len(x):
-            raise ValueError(f"Last element of 'p' must equal length of 'x' ({len(x)}), "
-                           f"got {p[-1]}")
-        # Check that p is non-decreasing
-        if not np.all(np.diff(p) >= 0):
-            raise ValueError("Array 'p' must be non-decreasing (valid CSR format)")
+                        f"got {len(p)}")
+
+    if np.max(i) >= ncol:
+        raise ValueError(f"Column indices in 'i' must be in range [0, {ncol-1}], "
+                            f"found maximum column index: {np.max(i)}")
     
     # Call the C++ function
     try:
@@ -2011,39 +1436,15 @@ def rank_matrix_dense(
 
     Notes
     -----
-    - Input matrix `x` is **not modified**; a new array is returned.
-    - Ranking is **column-wise and independent**.
+    - Input matrix `x` is not modified; a new array is returned.
+    - Ranking is column-wise and independent.
     """
 
-    # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    # Array dimension validation
-    if x.ndim != 2:
-        raise ValueError(f"Parameter 'x' must be 2-dimensional, got {x.ndim}D")
-    
+    # Array parameter validation
+    x = validate_float_input('x', x, ndim=2, allow_zero=True)
     # Scaler value validation
-    nrows, ncols = x.shape
-    if nrows == 0 or ncols == 0:
-        raise ValueError(f"Input matrix must be non-empty, got shape {x.shape}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
+    nthreads = standardiz_nthreads(nthreads)
 
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-    
-    # non-negativity check
-    if np.any(x < 0):
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be non-negative, "
-                         f"but found minimum value: {min_val}")
-    
     # Call C++ function
     try:
         result_dict = mm.cpp_rank_matrix_dense(x, nthreads)
@@ -2104,103 +1505,23 @@ def group_rank_csc(
         The function modifies `rank_data_out` in-place; no return value.
     """
     # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(p, np.ndarray):
-        raise TypeError(f"Parameter 'p' must be a numpy array, got {type(p)}")
-    if not isinstance(i, np.ndarray):
-        raise TypeError(f"Parameter 'i' must be a numpy array, got {type(i)}")
-    if not isinstance(rank_data_out, np.ndarray):
-        raise TypeError(f"Parameter 'rank_data_out' must be a numpy array, got {type(rank_data_out)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    if not isinstance(ncol, int):
-        raise TypeError(f"Parameter 'ncol' must be an integer, got {type(ncol)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
+    x = validate_float_input('x', x, ndim=1)
+    p = validate_int_input('p', p, ndim=1)
+    i = validate_int_input('i', i, ndim=1)
+    groups = validate_int_input('groups', groups, ndim=1)
+    rank_data_out = validate_output_buffer('rank_data_out', rank_data_out, ndim=1)
     
     # Scalar value validation
-    if ncol <= 0:
-        raise ValueError(f"Parameter 'ncol' must be positive, got {ncol}")
-    if nrow <= 0:
-        raise ValueError(f"Parameter 'nrow' must be positive, got {nrow}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Array dimension validation
-    if x.ndim != 1:
-        raise ValueError(f"Parameter 'x' must be 1-dimensional, got {x.ndim}D")
-    if rank_data_out.ndim != 1:
-        raise ValueError(f"Parameter 'rank_data_out' must be 1-dimensional, got {rank_data_out.ndim}D")
-    if p.ndim != 1:
-        raise ValueError(f"Parameter 'p' must be 1-dimensional, got {p.ndim}D")
-    if i.ndim != 1:
-        raise ValueError(f"Parameter 'i' must be 1-dimensional, got {i.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-    
-    if rank_data_out.dtype != np.float64:
-        raise TypeError(f"Array 'rank_data_out' must have dtype float64, got {rank_data_out.dtype}")
+    ncol = validate_int_scalar('ncol', ncol, positive=True)
+    nrow = validate_int_scalar('nrow', nrow, positive=True)
+    nthreads = standardiz_nthreads(nthreads)
 
-    if p.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'p' must have dtype int32 or int64, got {p.dtype}")
-    if i.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'i' must have dtype int32 or int64, got {i.dtype}")
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have dtype int32 or int64, got {groups.dtype}")
-    p, i, groups = p.astype(np.int32), i.astype(np.int32), groups.astype(np.int32)
-
-    # Contiguity and writability of output
-    if not rank_data_out.flags['C_CONTIGUOUS']:
-        raise ValueError("Array 'rank_data_out' must be C-contiguous")
-    if not rank_data_out.flags['WRITEABLE']:
-        raise ValueError("Array 'rank_data_out' must be writable (will be modified in-place)")
-    
-    # Array length validation
+    # validate csc matrix
     if len(x) != len(rank_data_out):
         raise ValueError(f"Array 'rank_data_out' must have the same length as 'x' ({len(x)}), "
                          f"got {len(rank_data_out)}")
-    if len(x) != len(i):
-        raise ValueError(f"Array 'i' must have the same length as 'x' ({len(x)}), "
-                         f"got {len(i)}")
-    if len(p) != ncol + 1:
-        raise ValueError(f"Array 'p' must have length ncol + 1 = {ncol + 1}, "
-                         f"got {len(p)}")
-    if len(groups) != nrow:
-        raise ValueError(f"Array 'groups' must have length equal to number of rows ({nrow}), "
-                         f"got {len(groups)}")
-    if len(x) == 0:
-        raise ValueError("Array 'x' must not be empty")
-
-    
-    # Ensure x are positive
-    if np.any(x <= 0):
-        # Find the minimum value for better error message
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be positive (greater than 0), "
-                         f"but found minimum value: {min_val}")
-    # Value range validation
-    if len(i) > 0:
-        max_row = np.max(i)
-        if max_row >= nrow:
-            raise ValueError(f"Row indices in 'i' must be in range [0, {nrow-1}], "
-                             f"found maximum row index: {max_row}")
-    
-    # Validate CSC format constraints
-    if len(p) > 0 and p[0] != 0:
-        raise ValueError(f"First element of 'p' must be 0, got {p[0]}")
-    if len(p) > 0 and p[-1] != len(x):
-        raise ValueError(f"Array 'x' must have length equal to number of non-zeros ({p[-1]}), "
-                         f"got {len(x)}")
-    
-    if not np.all(np.diff(p) >= 0):
-        raise ValueError("Array 'p' must be non-decreasing (valid CSC format)")
+    validate_spmatrix_input(x, p, i, groups, np.max(groups) + 1,
+                            nrow, ncol, cell_num=nrow, matrix_type='csc')
     
     # Call the C++ function
     try:
@@ -2245,54 +1566,14 @@ def group_rank_dense(
         The function modifies `rank_data_out` in-place; no return value.
     """
     # Type validation
-    if not isinstance(x, np.ndarray):
-        raise TypeError(f"Parameter 'x' must be a numpy array, got {type(x)}")
-    if not isinstance(rank_data_out, np.ndarray):
-        raise TypeError(f"Parameter 'rank_data_out' must be a numpy array, got {type(rank_data_out)}")
-    if not isinstance(groups, np.ndarray):
-        raise TypeError(f"Parameter 'groups' must be a numpy array, got {type(groups)}")
-    if not isinstance(nthreads, int):
-        raise TypeError(f"Parameter 'nthreads' must be an integer, got {type(nthreads)}")
-    
-    # Array dimension validation
-    if x.ndim != 2:
-        raise ValueError(f"Parameter 'x' must be 2-dimensional, got {x.ndim}D")
-    if rank_data_out.ndim != 2:
-        raise ValueError(f"Parameter 'rank_data_out' must be 2-dimensional, got {rank_data_out.ndim}D")
-    if groups.ndim != 1:
-        raise ValueError(f"Parameter 'groups' must be 1-dimensional, got {groups.ndim}D")
-    
-    nrow, ncol = x.shape
+    x = validate_float_input('x', x, ndim=2, allow_zero=True)
+    rank_data_out = validate_output_buffer('rank_data_out', rank_data_out, ndim=2)
+    groups = validate_int_input('groups', groups, ndim=1)
+    nthreads = standardiz_nthreads(nthreads)
 
-    # Scalar value validation
-    if nrow == 0 or ncol == 0:
-        raise ValueError(f"Input matrix must be non-empty, got shape {x.shape}")
-    if len(groups) != nrow:
-        raise ValueError(f"Array 'groups' must have length equal to number of rows ({nrow}), "
-                         f"got {len(groups)}")
-    if nthreads <= 0:
-        print("Warning: nthreads <= 0, using all available threads")
-    
-    # Data type validation
-    if x.dtype != np.float64:
-        if not np.issubdtype(x.dtype, np.floating):
-            raise TypeError(f"Input array must be floating-point, got {x.dtype}")
-        x = x.astype(np.float64)
-    
-    if rank_data_out.dtype != np.float64:
-        raise TypeError(f"Array 'rank_data_out' must have dtype float64, got {rank_data_out.dtype}")
-
-    if groups.dtype not in integer_dtypes:
-        raise TypeError(f"Array 'groups' must have dtype int32 or int64, got {groups.dtype}")
-    groups = groups.astype(np.int32)
-
-    # non-negativity check
-    if np.any(x < 0):
-        min_val = np.min(x)
-        raise ValueError(f"All elements in 'x' must be non-negative, "
-                         f"but found minimum value: {min_val}")
-    
-
+    # validate dense matrix
+    nrow, _ = x.shape
+    validate_denmatrix_input(groups, np.max(groups) + 1, cell_num=nrow)
     # call c++ function
     try:
         mm.cpp_group_rank_dense(x, rank_data_out, groups, nthreads)
