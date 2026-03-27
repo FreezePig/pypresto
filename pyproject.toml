@@ -18,8 +18,7 @@ dependencies = [
     "pandas",
     "anndata",
     "scipy>=1.10,<2",
-    "statsmodels",
-    "h5py",
+    "statsmodels"
 ]
 
 [tool.scikit-build]
@@ -36,6 +35,7 @@ BUILD_TESTING = "OFF"
 # skip PyPy and musllinux, only build CPython
 skip = ["pp*", "*-musllinux*", "*i686", "*-manylinux_aarch64"]
 build-verbosity = 1
+before-test = "pip install --only-binary=h5py h5py"
 test-command = "python -c \"import pypresto; import pypresto.matrix_module; print('Success!')\""
 
 [tool.cibuildwheel.linux]
