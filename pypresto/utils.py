@@ -28,7 +28,7 @@ def _(X: sp.csr_matrix, nthreads: int = 1) -> Dict:
 
     rank_data_out = np.zeros_like(X_csc.data, dtype=np.float64)
     ties = rank_matrix_csc(X_csc.data, X_csc.indptr, rank_data_out, 
-                            X_csc.shape[0], X_csc.shape[1], nthreads)
+                           X_csc.shape[0], X_csc.shape[1], nthreads)
     X_ranked = sp.csc_matrix((rank_data_out, X_csc.indices, X_csc.indptr), shape=X_csc.shape)
     return {'X_ranked': X_ranked, 'ties': ties}
     
@@ -38,7 +38,8 @@ def _(X: sp.csc_matrix, nthreads: int = 1) -> Dict:
     # Modify X.data in place
     X_copy = X.copy()  # Avoid modifying the original matrix
     rank_data_out = np.zeros_like(X_copy.data, dtype=np.float64)
-    ties = rank_matrix_csc(X_copy.data, X_copy.indptr, rank_data_out, X.shape[0], X.shape[1], nthreads)
+    ties = rank_matrix_csc(X_copy.data, X_copy.indptr, rank_data_out, 
+                           X.shape[0], X.shape[1], nthreads)
     X_ranked = sp.csc_matrix((rank_data_out, X_copy.indices, X_copy.indptr), shape=X_copy.shape)
     return {'X_ranked': X_ranked, 'ties': ties}
 
@@ -121,18 +122,18 @@ def _(X: sp.csr_matrix, groups: np.ndarray, trans: bool = False, nthreads: int =
 # ====== 4. group ranking function ======
 
 @singledispatch
-def group_rank_matrix(X, groups:np.ndarray, nthreads: int = 1):
+def group_rank(X, groups:np.ndarray, nthreads: int = 1):
     """General interface for grouply ranking matrix generating(for gini coefficient)"""
     raise NotImplementedError(f"rank_matrix not implemented for type {type(X)}")
 
-@group_rank_matrix.register
+@group_rank.register
 def _(X: np.ndarray, groups: np.ndarray, nthreads: int = 1) -> dict:
     """Grouply rank the cols of a dense numpy array"""
     rank_data_out = np.zeros_like(X, dtype=np.float64)
     group_rank_dense(X, rank_data_out, groups, nthreads)
     return {'ranked': rank_data_out, 'X': X}
 
-@group_rank_matrix.register
+@group_rank.register
 def _(X: sp.csr_matrix, groups: np.ndarray, nthreads: int = 1) -> dict:
     """Grouply rank the cols of a sparse CSR matrix"""
     X_csc = X.tocsc()
@@ -142,7 +143,7 @@ def _(X: sp.csr_matrix, groups: np.ndarray, nthreads: int = 1) -> dict:
     X_group_ranked = sp.csc_matrix((rank_data_out, X_csc.indices, X_csc.indptr), shape=X_csc.shape)
     return {'ranked': X_group_ranked, 'X': X_csc}
 
-@group_rank_matrix.register
+@group_rank.register
 def _(X: sp.csc_matrix, groups: np.ndarray, nthreads: int = 1) -> dict:
     """Grouply rank the cols of a sparse CSC matrix"""
     X_copy = X.copy()  # Avoid modifying the original matrix
@@ -154,16 +155,16 @@ def _(X: sp.csc_matrix, groups: np.ndarray, nthreads: int = 1) -> dict:
     
 # ====== 5. Additional function for statistics ======
 def compute_ustats(X_rank: Union[np.ndarray, sp.csr_matrix, sp.csc_matrix], 
-                   groups: np.ndarray, group_size: np.ndarray) -> np.ndarray:
+                   groups: np.ndarray, group_size: np.ndarray, nthreads: int = 1) -> np.ndarray:
     """Compute U statistics for groups in a matrix"""
     # group rank sum with zero uncalculated(for sparse matrix)
-    grs = sum_groups(X_rank, groups, nthreads=-1)
+    grs = sum_groups(X_rank, groups, nthreads=nthreads)
 
     # Dealing with sparse matrix
     if sp.issparse(X_rank):
         # calc rank sum for zero values
         # size: [n_groups, n_genes]
-        gnz = group_size[:, np.newaxis] - nnz_groups(X_rank, groups, nthreads=-1)
+        gnz = group_size[:, np.newaxis] - nnz_groups(X_rank, groups, nthreads=nthreads)
         # average rank for zero values, using the equation for arithmetic sequence sum
         # size: [n_genes]
         zero_ranks = (1 + np.sum(gnz, axis=0)) / 2
@@ -207,18 +208,18 @@ def compute_pval(ustat: np.ndarray, ties: List, N: int, n1n2: np.ndarray) -> Tup
     pvals = 2 * norm.cdf(-np.abs(z_norm))
     return pvals, z_norm
 
-def compute_gini(X: Union[np.ndarray, sp.csc_matrix, sp.csr_matrix],
+def compute_nnz_gini(X: Union[np.ndarray, sp.csc_matrix, sp.csr_matrix],
                  groups: np.ndarray, nthreads: int = 1) -> np.ndarray:
-    """Compute Gini coefficients for groups in a matrix"""
+    """Compute Gini coefficients for groups in a matrix based on non-zero counts"""
     group_nnz = nnz_groups(X, groups, nthreads=nthreads)
     group_sum = sum_groups(X, groups, nthreads=nthreads)
-    group_rank_result = group_rank_matrix(X, groups, nthreads)
-    group_rank = group_rank_result['ranked']
+    group_rank_result = group_rank(X, groups, nthreads)
+    ranks = group_rank_result['ranked']
     new_X = group_rank_result['X']
-    if sp.isspmatrix_csc(group_rank):
-        mut_X = sp.csc_matrix((group_rank.data*new_X.data, new_X.indices, new_X.indptr), shape=new_X.shape)
-    elif isinstance(group_rank, np.ndarray):
-        mut_X = group_rank * new_X
+    if sp.isspmatrix_csc(ranks):
+        mut_X = sp.csc_matrix((ranks.data*new_X.data, new_X.indices, new_X.indptr), shape=new_X.shape)
+    elif isinstance(ranks, np.ndarray):
+        mut_X = ranks * new_X
     else:
         raise TypeError("Unsupported type for group_rank")
     

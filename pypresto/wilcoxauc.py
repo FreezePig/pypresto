@@ -80,25 +80,23 @@ def wilcoxauc(
     start_time = time.time()
     is_adata = isinstance(data, AnnData)
 
-    if not is_adata:
-        if copy or layer or key_added is not None:
-            print("Warning: 'copy', 'layer', and 'key_added' are ignored when data is not AnnData.")
-        if use_raw:
-            print("Warning: 'copy', 'layer', and 'key_added' are ignored when data is not AnnData.")
+    if not is_adata and any([copy, layer, key_added is not None, use_raw]):
+        print("Warning: 'copy', 'layer', 'key_added' and 'use_raw' are ignored when data is not AnnData.")
     
     if groupby is None:
         raise ValueError("'groupby' must be specified.")
+    
     end_time = time.time()
     if verbose:
         print(f"Parameter check took {end_time - start_time:.2f} seconds.")
         print("================================")
 
-    # 2. Extract data matrix X and group labels y
+    # 2. Extract data matrix `X`, group labels `y` and gene names `var_names`
     if verbose:
         print("Extracting data matrix and group labels...")
     start_time = time.time()
     X, y, var_names = _extract_data_and_groups(
-        data, groupby, 
+        data, groupby,
         layer=layer if is_adata else None,
         use_raw=use_raw if is_adata else None
     )
@@ -265,7 +263,7 @@ def calc_gini(
     
     # 3. calculate gini
     code_dict = _encode_groups(y ,'all')
-    gini = compute_gini(X, code_dict['y_encoded'], nthreads=-1)
+    gini = compute_nnz_gini(X, code_dict['y_encoded'], nthreads=-1)
 
     # 4. Format results
     long_df = _format_results({'gini': gini}, code_dict['target_codes'], 
@@ -285,6 +283,7 @@ def _extract_data_and_groups(data, groupby, layer = None, use_raw = None):
         except Exception as e:
             raise ValueError(f"Could not convert 'groupby' to numpy array: {e}")
         
+        #! Default settings: X is cells x genes, groupby is length of cells
         if groupby_arr.ndim != 1:
             raise ValueError(f"groupby must be 1-dimensional; got shape {groupby_arr.shape}")
         if len(groupby_arr) != data.shape[0]:
@@ -293,7 +292,8 @@ def _extract_data_and_groups(data, groupby, layer = None, use_raw = None):
         if isinstance(data, (np.ndarray, sp.spmatrix)):
             var_names = [f"gene_{i}" for i in range(data.shape[1])]
             X = data
-        else: # pd.DataFrame
+        else: 
+            # pd.DataFrame
             var_names = data.columns.tolist()
             X = data.values
         return X, groupby_arr, var_names
@@ -312,8 +312,9 @@ def _from_anndata(adata, groupby, layer, use_raw):
         X = adata.layers[layer]
     elif use_raw and adata.raw is not None:
         X = adata.raw.X
-    else:   
+    else:
         X = adata.X
+
     # extract group labels
     y = adata.obs[groupby].values
     y = np.asarray(y)
@@ -364,30 +365,27 @@ def _encode_groups(y, groups):
     }
 
 def _wilcoxauc_core(X, y, corr_method, verbose):
-    """calculate wilcoxauc statistics, including:
-      avgExpr, logfoldchanges, score(norm U), 
-      auc, pvals, padj, pct_1, pct_2"""
+    """
+    calculate wilcoxauc statistics, including:
+    avgExpr, logfoldchanges, score(norm U), 
+    auc, pvals, padj, pct_1, pct_2
+    """
     
     # 1. pvals/adj_pval, score, and auc calculation
     if verbose:
         print("wilcoxauc_core: computing pvals, scores, and AUC...")
-    start_time_1 = time.time()
+
     group_size = np.bincount(y)
     n_groups = len(group_size)
     n_cells = X.shape[0]
     n1n2 = group_size * (n_cells - group_size)
     n1n2 = n1n2.reshape(-1, 1)  # n1n2.ravel() in compute_pval
-    if verbose:
-        print(f"Group size calculation took {time.time() - start_time_1:.2f} seconds.")
-
-    if verbose:
-        print(f"Ranking matrix ({n_cells} cells * {X.shape[1]} genes)...")
 
     start_time = time.time()
     
-    if isinstance(X, sp.csr_matrix):
-        rank_result = rank_matrix(X, nthreads=-1)
-        print("Using csr return")
+    #! 这里需要检查
+    rank_result = rank_matrix(X, nthreads=-1)
+
     X_ranked = rank_result['X_ranked']
     ties_info = rank_result['ties']
     if verbose:
