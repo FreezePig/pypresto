@@ -1309,7 +1309,7 @@ def rank_matrix_csr_(
     nrow: int,
     ncol: int,
     nthreads: int = 1
-) -> dict:
+) -> List[List[float]]:
     """
     Compute average ranks for non-zero elements in a CSR-formatted sparse matrix, column-wise.
 

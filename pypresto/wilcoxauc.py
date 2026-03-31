@@ -26,6 +26,7 @@ def wilcoxauc(
     key_added: Optional[str] = None,
     # ===== other params =====
     verbose: bool = True,
+    nthreads: int = -1,
     **kwargs
     
 ):
@@ -65,7 +66,12 @@ def wilcoxauc(
         Use adata.layers[layer] instead of adata.X.
     key_added : str, optional
         Key in adata.uns to store results.
-        
+    
+    # === other parameters ===
+    verbose : bool (default True)
+        Print progress messages.
+    nthreads : int (default -1)
+        Number of threads to use for computation. -1 means using all available cores.
     Returns
     -------
     AnnData or pd.DataFrame
@@ -130,18 +136,18 @@ def wilcoxauc(
         else:
             reference_code = code_dict['label_to_code'][reference]
     end_time = time.time()
+
     if verbose:
         print(f"Group processing took {end_time - start_time:.2f} seconds.")
         print("================================")
 
     # 5. Core computation
     if reference == 'rest':
-        core_results_ = _wilcoxauc_core(X, code_dict['y_encoded'], corr_method, verbose=verbose)
+        core_results_ = _wilcoxauc_core(X, code_dict['y_encoded'], corr_method, nthreads, verbose=verbose)
         # slice results into only target groups
         target_indices = code_dict['target_codes']
         results_ = {
-            key: val[target_indices, :] if val.ndim == 2 else val[target_indices]
-              for key, val in core_results_.items()
+            key: val[target_indices, :] for key, val in core_results_.items()
         }
     else:
         # Specific reference group: 
@@ -180,7 +186,7 @@ def wilcoxauc(
             y_sub = np.zeros(np.sum(combined_mask), dtype=np.int32)
             y_sub[ref_mask[combined_mask]] = 1  # reference group as 1
 
-            core_results_sub = _wilcoxauc_core(X_sub, y_sub, corr_method, verbose = verbose)
+            core_results_sub = _wilcoxauc_core(X_sub, y_sub, corr_method, nthreads, verbose = verbose)
 
             # Store results
             for key in results_.keys():
@@ -199,7 +205,7 @@ def wilcoxauc(
         else:
             adata = data
 
-        key = key_added if key_added is not None else 'rank_genes_groups_cpp'
+        key = key_added if key_added is not None else 'genes_groups_multi_index'
         adata.uns[key] = long_df
         
         return adata if copy else None
@@ -364,7 +370,7 @@ def _encode_groups(y, groups):
         'target_labels': target_labels,
     }
 
-def _wilcoxauc_core(X, y, corr_method, verbose):
+def _wilcoxauc_core(X, y, corr_method, nthreads, verbose):
     """
     calculate wilcoxauc statistics, including:
     avgExpr, logfoldchanges, score(norm U), 
@@ -382,18 +388,16 @@ def _wilcoxauc_core(X, y, corr_method, verbose):
     n1n2 = n1n2.reshape(-1, 1)  # n1n2.ravel() in compute_pval
 
     start_time = time.time()
-    
-    #! 这里需要检查
-    rank_result = rank_matrix(X, nthreads=-1)
-
-    X_ranked = rank_result['X_ranked']
-    ties_info = rank_result['ties']
+    # three type of X: dense ndarray, csr_matrix, csc_matrix
+    rank_result = rank_matrix(X, nthreads=nthreads)
+    # calculate pvals matrix and z-norm score matrix
+    X_ranked = rank_result['X_ranked'] # sp.csr_matrix or np.ndarrayy
+    ties_info = rank_result['ties'] # List of lists
     if verbose:
         print(f"Ranking matrix took {time.time() - start_time:.2f} seconds.")
-    ustat_matrix = compute_ustats(X_ranked, y, group_size)
-    pval_matrix, z_norm_matrix = compute_pval(
-        ustat_matrix, ties_info, n_cells, n1n2
-    )
+    ustat_matrix = compute_ustats(X_ranked, y, group_size, nthreads)
+    pval_matrix, z_norm_matrix = compute_pval(ustat_matrix, ties_info, n_cells, n1n2)
+
     # multiple testing correction
     fdr = np.zeros_like(pval_matrix)
     for g in range(n_groups):
@@ -405,7 +409,7 @@ def _wilcoxauc_core(X, y, corr_method, verbose):
     auc = ustat_matrix / n1n2
     
     if verbose:
-        print(f"wilcoxauc_core: pvals, scores and AUC computation took {time.time() - start_time_1:.2f} seconds.")
+        print(f"wilcoxauc_core: pvals, scores and AUC computation took {time.time() - start_time:.2f} seconds.")
         print("================================")
 
     # 2. pct_1, pct_2, avgExpr, logfoldchanges calculation
@@ -413,8 +417,8 @@ def _wilcoxauc_core(X, y, corr_method, verbose):
         print("Computing expression statistics...")
     start_time = time.time()
 
-    group_sum = sum_groups(X, y, trans=False, nthreads=-1)
-    group_nnz = nnz_groups(X, y, trans=False, nthreads=-1)
+    group_sum = sum_groups(X, y, trans=False, nthreads=nthreads)
+    group_nnz = nnz_groups(X, y, trans=False, nthreads=nthreads)
     group_mean = group_sum / group_size[:, np.newaxis]
 
     pct_1 = (group_nnz / group_size[:, np.newaxis]) * 100
@@ -429,11 +433,13 @@ def _wilcoxauc_core(X, y, corr_method, verbose):
     rest_mean = ((np.sum(group_sum, axis=0, keepdims=True)-group_sum) / 
                                 (n_cells - group_size[:, np.newaxis]))
     sec_mean = _get_second_largest(group_mean)
+    
     lfc = np.log2((group_mean + epsilon) / (rest_mean + epsilon))
     lfc_sec = np.log2((group_mean + epsilon) / (sec_mean + epsilon))
     if verbose:
         print(f"Expression statistics computation took {time.time() - start_time:.2f} seconds.")
         print("================================")
+
     return {
         'avgExpr': group_mean,
         'logfoldchanges': lfc,
@@ -447,15 +453,13 @@ def _wilcoxauc_core(X, y, corr_method, verbose):
         'lfc_sec': lfc_sec,
     }
 
-def _format_results(results_, target_codes, code_to_label, var_names, n_genes = None, sort = True):
+def _format_results(results_, target_codes, code_to_label, 
+                    var_names, n_genes = None, sort = True):
     """format results into long data"""
+
     group_names = [code_to_label[code] for code in target_codes]
 
     long_df = wide2long(results_, var_names, group_names)
-    # long_df = long_df.sort_values(
-    #     by = ['cluster', 'pval', 'logfoldchanges'],
-    #     ascending = [True, True, False]
-    # ).reset_index(drop=True)
     if sort:
         long_df = long_df.sort_values(
             by = ['cluster','padj', 'score'],
@@ -465,13 +469,17 @@ def _format_results(results_, target_codes, code_to_label, var_names, n_genes = 
     if n_genes is not None:
         if not isinstance(n_genes, int) or n_genes <= 0:
             raise ValueError(f"n_genes must be a positive integer, got {n_genes}")
+        if not sort:
+            print("Warning: n_genes is applied without sorting, which may lead to unexpected results. Consider setting sort=True.")
         long_df = long_df.groupby('cluster', sort=False).head(n_genes).reset_index(drop=True)
 
     return long_df
 
 def _get_second_largest(arr: np.ndarray) -> np.ndarray:
-    """get the largest value in each column of 2D array"""
-    """apart from the origin value in the array"""
+    """
+    get the largest value in each column of 2D array
+    apart from the origin value in the array
+    """
 
     partitioned = np.partition(arr, -2, axis=0)
     global_max = partitioned[-1, :]
