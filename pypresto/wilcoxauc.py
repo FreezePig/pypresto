@@ -118,7 +118,8 @@ def wilcoxauc(
     if mask_var is not None:
         mask = _process_mask_var(mask_var, data, is_adata, X.shape[1])
         X = X[:, mask]
-        var_names = var_names[mask] if var_names is not None else None
+        var_names = np.asarray(var_names)[mask].tolist() if var_names is not None else None
+    X, var_names = _remove_all_zero_genes(X, var_names)
     end_time = time.time()
     if verbose:
         print(f"Mask processing took {end_time - start_time:.2f} seconds.")
@@ -342,6 +343,24 @@ def _process_mask_var(mask_var, data, is_adata, n_genes):
         if len(mask) != n_genes:
             raise ValueError("mask_var length must match number of genes")
     return mask
+
+def _remove_all_zero_genes(X, var_names):
+    """Remove genes whose expression is zero across all cells."""
+    if sp.issparse(X):
+        nonzero_mask = np.asarray(X.getnnz(axis=0)).ravel() > 0
+    else:
+        nonzero_mask = np.any(X != 0, axis=0)
+
+    if not np.any(nonzero_mask):
+        raise ValueError("No genes remain after filtering all-zero genes.")
+
+    if np.all(nonzero_mask):
+        return X, var_names
+
+    X = X[:, nonzero_mask]
+    if var_names is not None:
+        var_names = np.asarray(var_names)[nonzero_mask].tolist()
+    return X, var_names
 
 def _encode_groups(y, groups):
     """Encode group labels and determine target groups for comparison"""
