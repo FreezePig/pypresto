@@ -154,7 +154,7 @@ def validate_float_input(name: str, arr, ndim: Optional[int] = None,
     """
     arr = validate_ndarray(name, arr, ndim = ndim)
 
-    if not np.issubtype(arr.dtype, np.floating):
+    if not np.issubdtype(arr.dtype, np.floating):
         raise TypeError(f"Parameter '{name}' must be a floating-point array, got dtype {arr.dtype}")
     
     if not allow_empty and arr.size == 0:
