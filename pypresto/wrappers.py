@@ -221,7 +221,7 @@ def validate_output_buffer(name: str, arr, ndim: Optional[int] = None) -> np.nda
 
 def validate_int_input(name: str, arr, ndim: Optional[int] = None) -> np.ndarray:
     """
-    Validate an integer index array and coerce it to int32.
+    Validate an integer array and preserve 64-bit-safe dtypes.
 
     Parameters
     ----------
@@ -245,8 +245,14 @@ def validate_int_input(name: str, arr, ndim: Optional[int] = None) -> np.ndarray
             f"got {arr.dtype}"
         )
     
-    if arr.dtype != np.int32:
-        arr = arr.astype(np.int32)
+    if arr.dtype not in (np.int32, np.int64):
+        if np.issubdtype(arr.dtype, np.unsignedinteger) and arr.size > 0:
+            max_int64 = np.iinfo(np.int64).max
+            if np.max(arr) > max_int64:
+                raise ValueError(
+                    f"Parameter '{name}' contains values too large for int64 conversion"
+                )
+        arr = arr.astype(np.int64)
     
     return arr
 

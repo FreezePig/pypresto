@@ -7,6 +7,7 @@
 #include <cmath>
 #include <algorithm>
 #include <vector>
+#include <cstdint>
 #include <omp.h>
 
 #ifdef _MSC_VER
@@ -19,14 +20,16 @@ using namespace pybind11::literals;
 namespace py = pybind11;
 
 constexpr double TIE_TOL = 1e-5;
+using index_t = std::int64_t;
+using count_t = std::int64_t;
 
 inline bool is_tied(double a, double b) {
     return std::abs(a - b) <= TIE_TOL;
 }
 
 struct Entry {
-    int data_index; // original index
-    int group_id;   // group id for cell
+    index_t data_index; // original index
+    index_t group_id;   // group id for cell
     double value;   // original value
 
     // sorted by group and value
@@ -39,8 +42,8 @@ struct Entry {
 };
 
 struct DenseEntry {
-    int row_idx;   // row index
-    int group_id;  // group id for cell
+    index_t row_idx;   // row index
+    index_t group_id;  // group id for cell
     double value;  // original value
 
     bool operator<(const DenseEntry& other) const {
@@ -54,11 +57,11 @@ struct DenseEntry {
 // Sum groups for csc matrix (compressed sparse column)
 py::array_t<double> cpp_sumGroups_csc(
     py::array_t<double> x,         // non-zero element values (by column)
-    py::array_t<int> p,         // The start and end indices of each column's non-zero elements
-    py::array_t<int> i,         // The row index corresponding to each non-zero element
-    int ncol,                   // column number of the matrix
-    py::array_t<int> groups,    // The group index for each row
-    int ngroups,                // Total number of groups
+    py::array_t<index_t> p,        // The start and end indices of each column's non-zero elements
+    py::array_t<index_t> i,        // The row index corresponding to each non-zero element
+    index_t ncol,                  // column number of the matrix
+    py::array_t<index_t> groups,   // The group index for each row
+    index_t ngroups,               // Total number of groups
     int nthreads                   // number of threads to use
 ) {
     // get read-only access to input data
@@ -86,12 +89,12 @@ py::array_t<double> cpp_sumGroups_csc(
         py::gil_scoped_release release;
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(dynamic)
-        for (int c = 0; c < ncol; ++c) {
-            for (int j = p_(c); j < p_(c + 1); ++j) {
-                int row = i_(j);
+        for (index_t c = 0; c < ncol; ++c) {
+            for (index_t j = p_(c); j < p_(c + 1); ++j) {
+                index_t row = i_(j);
                 if (row >= groups_.shape(0)) continue;
 
-                int group = groups_(row);
+                index_t group = groups_(row);
                 if (group >= ngroups) continue;
                 res_(group, c) += x_(j); // Different threads write to different columns, safe
             }
@@ -103,13 +106,13 @@ py::array_t<double> cpp_sumGroups_csc(
 // Sum groups for csr matrix (compressed sparse row)
 py::array_t<double> cpp_sumGroups_csr(
     py::array_t<double> x,        // non-zero element values (by row)
-    py::array_t<int> p,        // The start and end indices of each row's non-zero elements
-    py::array_t<int> i,        // The column index corresponding to each non-zero element
-    int ncol,                  // column number of the matrix
-    int nrow,                  // row number of the matrix
-    py::array_t<int> groups,   // The group index for each raw
-    int ngroups,               // Total number of groups
-    int nthreads               // number of threads to use
+    py::array_t<index_t> p,       // The start and end indices of each row's non-zero elements
+    py::array_t<index_t> i,       // The column index corresponding to each non-zero element
+    index_t ncol,                 // column number of the matrix
+    index_t nrow,                 // row number of the matrix
+    py::array_t<index_t> groups,  // The group index for each raw
+    index_t ngroups,              // Total number of groups
+    int nthreads                  // number of threads to use
 ) {
     // get read-only access to input data
     auto x_ = x.unchecked<1>();
@@ -123,7 +126,7 @@ py::array_t<double> cpp_sumGroups_csr(
     double* ptr_res = (double*)buf_res.ptr;
 
     // initialize ptr_res to 0
-    int total_size = ngroups * ncol;
+    index_t total_size = ngroups * ncol;
     std::memset(ptr_res, 0, sizeof(double) * total_size);
 
     // Set number of threads
@@ -137,7 +140,7 @@ py::array_t<double> cpp_sumGroups_csr(
     {
         py::gil_scoped_release release;
 
-        std::vector<double> local_sums(threads_to_use * total_size, 0.0);
+        std::vector<double> local_sums(static_cast<size_t>(threads_to_use) * total_size, 0.0);
 
         #pragma omp parallel num_threads(threads_to_use)
         {
@@ -145,12 +148,12 @@ py::array_t<double> cpp_sumGroups_csr(
             double* local_buffer = local_sums.data() + thread_id * total_size;
 
             #pragma omp for schedule(dynamic)
-            for (int r = 0; r < nrow; ++r) {
-                const int group = groups_(r);
+            for (index_t r = 0; r < nrow; ++r) {
+                const index_t group = groups_(r);
                 if (group >= ngroups) continue; // skip invalid group
 
-                for (int j = p_(r); j < p_(r + 1); ++j) {
-                    const int col = i_(j);
+                for (index_t j = p_(r); j < p_(r + 1); ++j) {
+                    const index_t col = i_(j);
                     if (col >= ncol) continue;
                     local_buffer[group * ncol + col] += x_(j);
                 }
@@ -158,7 +161,7 @@ py::array_t<double> cpp_sumGroups_csr(
         }
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(static)
-        for (int idx = 0; idx < total_size; ++idx) {
+        for (index_t idx = 0; idx < total_size; ++idx) {
             double acc = 0.0;
 
             for (int t = 0; t < threads_to_use; ++t) {
@@ -172,12 +175,12 @@ py::array_t<double> cpp_sumGroups_csr(
 
 py::array_t<double> cpp_sumGroups_csc_T(
     py::array_t<double> x,         // non-zero element values (by column)
-    py::array_t<int> p,         // The start and end indices of each column's non-zero
-    py::array_t<int> i,         // The raw index corresponding to each non-zero element
-    int ncol,                   // column number of the matrix
-    int nrow,                   // row number of the matrix
-    py::array_t<int> groups,    // the group index for each column
-    int ngroups,                // total number of groups
+    py::array_t<index_t> p,        // The start and end indices of each column's non-zero
+    py::array_t<index_t> i,        // The raw index corresponding to each non-zero element
+    index_t ncol,                  // column number of the matrix
+    index_t nrow,                  // row number of the matrix
+    py::array_t<index_t> groups,   // the group index for each column
+    index_t ngroups,               // total number of groups
     int nthreads                   // number of threads to use
 ) {
     // Get read-only access to input data
@@ -192,7 +195,7 @@ py::array_t<double> cpp_sumGroups_csc_T(
     double* ptr_res = (double*)buf_res.ptr;
 
     // Initialize res to 0
-    int total_size = ngroups * nrow;
+    index_t total_size = ngroups * nrow;
     std::memset(ptr_res, 0.0, sizeof(double) * total_size);
 
     // Set number of threads
@@ -205,7 +208,7 @@ py::array_t<double> cpp_sumGroups_csc_T(
 
     {
         py::gil_scoped_release release;
-        std::vector<double> local_sums(threads_to_use * total_size, 0.0);
+        std::vector<double> local_sums(static_cast<size_t>(threads_to_use) * total_size, 0.0);
 
         #pragma omp parallel num_threads(threads_to_use)
         {
@@ -213,12 +216,12 @@ py::array_t<double> cpp_sumGroups_csc_T(
             double* local_buffer = local_sums.data() + thread_id * total_size;
 
             #pragma omp for schedule(dynamic)
-            for (int c = 0; c < ncol; ++c) {
-                const int group = groups_(c);
+            for (index_t c = 0; c < ncol; ++c) {
+                const index_t group = groups_(c);
                 if (group >= ngroups) continue; // skip invalid group
 
-                for (int j = p_(c); j < p_(c+1); ++j) {
-                    const int row = i_(j);
+                for (index_t j = p_(c); j < p_(c+1); ++j) {
+                    const index_t row = i_(j);
                     if (row >= nrow) continue;
                     local_buffer[group * nrow + row] += x_(j);
                 }
@@ -226,7 +229,7 @@ py::array_t<double> cpp_sumGroups_csc_T(
         }
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(static)
-        for (int idx = 0; idx < total_size; ++idx) {
+        for (index_t idx = 0; idx < total_size; ++idx) {
             double acc = 0.0;
 
             for (int t = 0; t < threads_to_use; ++t) {
@@ -240,11 +243,11 @@ py::array_t<double> cpp_sumGroups_csc_T(
 
 py::array_t<double> cpp_sumGroups_csr_T(
     py::array_t<double> x,        // non-zero element values (by row)
-    py::array_t<int> p,        // The start and end indices of each row's non-zero elements
-    py::array_t<int> i,        // The column index corresponding to each non-zero element
-    int nrow,                  // row number of the matrix
-    py::array_t<int> groups,   // The group index for each column
-    int ngroups,               // Total number of groups
+    py::array_t<index_t> p,       // The start and end indices of each row's non-zero elements
+    py::array_t<index_t> i,       // The column index corresponding to each non-zero element
+    index_t nrow,                 // row number of the matrix
+    py::array_t<index_t> groups,  // The group index for each column
+    index_t ngroups,              // Total number of groups
     int nthreads                  // number of threads to use
 ) {
     // get read-only access to input data
@@ -271,11 +274,11 @@ py::array_t<double> cpp_sumGroups_csr_T(
         py::gil_scoped_release release;
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(dynamic)
-        for (int r = 0; r < nrow; ++r) {
-            for (int j = p_(r); j < p_(r + 1); ++j) {
-                const int col = i_(j);
+        for (index_t r = 0; r < nrow; ++r) {
+            for (index_t j = p_(r); j < p_(r + 1); ++j) {
+                const index_t col = i_(j);
                 if (col >= groups_.shape(0)) continue;
-                const int group = groups_(col);
+                const index_t group = groups_(col);
                 if (group >= ngroups) continue;
                 res_(group, r) += x_(j); // Different threads write to different columns, safe
             }
@@ -286,7 +289,7 @@ py::array_t<double> cpp_sumGroups_csr_T(
 
 py::array_t<double> cpp_sumGroups_dense(
     py::array_t<double> x,          // input dense matrix
-    py::array_t<int> groups,     // group index for each row
+    py::array_t<index_t> groups,    // group index for each row
     size_t ngroups                  // total number of groups
 ) {
     // get the read-only access to input data
@@ -322,7 +325,7 @@ py::array_t<double> cpp_sumGroups_dense(
 
 py::array_t<double> cpp_sumGroups_dense_T(
     py::array_t<double> x,         // input dense matrix
-    py::array_t<int> groups,    // group index for each column
+    py::array_t<index_t> groups,   // group index for each column
     size_t ngroups                 // total number of groups
 ) {
     // get the read-only access to input data
@@ -357,10 +360,10 @@ py::array_t<double> cpp_sumGroups_dense_T(
 }
 
 
-py::array_t<int> cpp_nnzeroGroups_dense(
+py::array_t<count_t> cpp_nnzeroGroups_dense(
     py::array_t<double> x,         // input dense matrix
-    py::array_t<int> groups,    // group index for each row
-    int ngroups,                // total number of groups
+    py::array_t<index_t> groups,   // group index for each row
+    index_t ngroups,               // total number of groups
     int nthreads                   // number of threads to use
 ) {
     // get the read-only access to input data
@@ -373,11 +376,11 @@ py::array_t<int> cpp_nnzeroGroups_dense(
 
     // create the result matrix
     std::vector<ssize_t> shape = {static_cast<ssize_t>(ngroups), static_cast<ssize_t>(ncols)};
-    py::array_t<int, py::array::f_style> res(shape);
+    py::array_t<count_t, py::array::f_style> res(shape);
     auto res_ = res.mutable_unchecked<2>(); // get a writable accessor for a two-dimensional array
 
     // initialize the result matrix to 0
-    std::memset(res_.mutable_data(0, 0), 0, sizeof(int) * ngroups * ncols);
+    std::memset(res_.mutable_data(0, 0), 0, sizeof(count_t) * ngroups * ncols);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -404,10 +407,10 @@ py::array_t<int> cpp_nnzeroGroups_dense(
     return res;
 }
 
-py::array_t<int> cpp_nnzeroGroups_dense_T(
+py::array_t<count_t> cpp_nnzeroGroups_dense_T(
     py::array_t<double> x,         // input dense matrix
-    py::array_t<int> groups,    // group index for each column
-    int ngroups,                // total number of groups
+    py::array_t<index_t> groups, // group index for each column
+    index_t ngroups,            // total number of groups
     int nthreads                   // number of threads to use
 ) {
     // get the read-only access to input data
@@ -420,11 +423,11 @@ py::array_t<int> cpp_nnzeroGroups_dense_T(
 
     // create result matrix
     std::vector<ssize_t> shape = {static_cast<ssize_t>(ngroups), static_cast<ssize_t>(nrows)};
-    py::array_t<int, py::array::f_style> res(shape);
+    py::array_t<count_t, py::array::f_style> res(shape);
     auto res_ = res.mutable_unchecked<2>(); // get a writable accessor for a two-dimensional array
 
     // initialize the result matrix to 0
-    std::memset(res_.mutable_data(0, 0), 0, sizeof(int) * ngroups * nrows);
+    std::memset(res_.mutable_data(0, 0), 0, sizeof(count_t) * ngroups * nrows);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -450,12 +453,12 @@ py::array_t<int> cpp_nnzeroGroups_dense_T(
     return res;
 }
 
-py::array_t<int> cpp_nnzeroGroups_csc(
-    py::array_t<int> p,
-    py::array_t<int> i,
-    int ncol,
-    py::array_t<int> groups,
-    int ngroups,
+py::array_t<count_t> cpp_nnzeroGroups_csc(
+    py::array_t<index_t> p,
+    py::array_t<index_t> i,
+    index_t ncol,
+    py::array_t<index_t> groups,
+    index_t ngroups,
     int nthreads
 ) {
     // read only access
@@ -464,11 +467,11 @@ py::array_t<int> cpp_nnzeroGroups_csc(
     auto groups_ = groups.unchecked<1>();
 
     // create result matrix
-    py::array_t<int, py::array::f_style> res({ngroups, ncol});
+    py::array_t<count_t, py::array::f_style> res({ngroups, ncol});
     auto res_ = res.mutable_unchecked<2>();
 
     // initialize to 0
-    std::memset(res_.mutable_data(0, 0), 0, sizeof(int) * ngroups * ncol);
+    std::memset(res_.mutable_data(0, 0), 0, sizeof(count_t) * ngroups * ncol);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -482,11 +485,11 @@ py::array_t<int> cpp_nnzeroGroups_csc(
         py::gil_scoped_release release;
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(dynamic)
-        for (int c = 0; c < ncol; ++c) {
-            for (int j = p_(c); j < p_(c + 1); ++j) {
-                int row = i_(j);
+        for (index_t c = 0; c < ncol; ++c) {
+            for (index_t j = p_(c); j < p_(c + 1); ++j) {
+                index_t row = i_(j);
                 if (row >= groups_.shape(0)) continue;
-                int group = groups_(row);
+                index_t group = groups_(row);
                 if (group >= ngroups) continue;
                 res_(group, c)++;
             }
@@ -495,13 +498,13 @@ py::array_t<int> cpp_nnzeroGroups_csc(
     return res;
 }
 
-py::array_t<int> cpp_nnzeroGroups_csr(
-    py::array_t<int> p,
-    py::array_t<int> i,
-    int ncol,
-    int nrow,
-    py::array_t<int> groups,
-    int ngroups,
+py::array_t<count_t> cpp_nnzeroGroups_csr(
+    py::array_t<index_t> p,
+    py::array_t<index_t> i,
+    index_t ncol,
+    index_t nrow,
+    py::array_t<index_t> groups,
+    index_t ngroups,
     int nthreads
 ) {
     // get read-only access to input data
@@ -510,13 +513,13 @@ py::array_t<int> cpp_nnzeroGroups_csr(
     auto groups_ = groups.unchecked<1>();
 
     // creat result matrix
-    py::array_t<int> res({ngroups, ncol});
+    py::array_t<count_t> res({ngroups, ncol});
     auto buf_res = res.request();
-    int* ptr_res = (int*)buf_res.ptr;
+    count_t* ptr_res = (count_t*)buf_res.ptr;
 
     // initialize res_ to 0
-    int total_size = ngroups * ncol;
-    std::memset(ptr_res, 0, sizeof(int) * total_size);
+    index_t total_size = ngroups * ncol;
+    std::memset(ptr_res, 0, sizeof(count_t) * total_size);
 
     // set number of threads
     const int max_threads = omp_get_max_threads();
@@ -528,20 +531,20 @@ py::array_t<int> cpp_nnzeroGroups_csr(
 
     {
         py::gil_scoped_release release;
-        std::vector<int> local_sums(threads_to_use * total_size, 0);
+        std::vector<count_t> local_sums(static_cast<size_t>(threads_to_use) * total_size, 0);
 
         #pragma omp parallel num_threads(threads_to_use)
         {
             const int thread_id = omp_get_thread_num();
-            int* local_buffer = local_sums.data() + thread_id * total_size;
+            count_t* local_buffer = local_sums.data() + thread_id * total_size;
 
             #pragma omp for schedule(dynamic)
-            for (int r = 0; r < nrow; ++r) {
-                const int group = groups_(r);
+            for (index_t r = 0; r < nrow; ++r) {
+                const index_t group = groups_(r);
                 if (group >= ngroups) continue; // skip invalid group
 
-                for (int j = p_(r); j < p_(r + 1); ++j) {
-                    const int col = i_(j);
+                for (index_t j = p_(r); j < p_(r + 1); ++j) {
+                    const index_t col = i_(j);
                     if (col >= ncol) continue;
                     local_buffer[group * ncol + col] ++;
                 }
@@ -549,8 +552,8 @@ py::array_t<int> cpp_nnzeroGroups_csr(
         }
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(static)
-        for (int idx = 0; idx < total_size; ++idx) {
-            int acc = 0;
+        for (index_t idx = 0; idx < total_size; ++idx) {
+            count_t acc = 0;
 
             for (int t = 0; t < threads_to_use; ++t) {
                 acc += local_sums[t * total_size + idx];
@@ -561,13 +564,13 @@ py::array_t<int> cpp_nnzeroGroups_csr(
     return res;
 }
 
-py::array_t<int> cpp_nnzeroGroups_csc_T(
-    py::array_t<int> p,
-    py::array_t<int> i,
-    int ncol,
-    int nrow,
-    py::array_t<int> groups,
-    int ngroups,
+py::array_t<count_t> cpp_nnzeroGroups_csc_T(
+    py::array_t<index_t> p,
+    py::array_t<index_t> i,
+    index_t ncol,
+    index_t nrow,
+    py::array_t<index_t> groups,
+    index_t ngroups,
     int nthreads
 ) {
     // read only access
@@ -576,13 +579,13 @@ py::array_t<int> cpp_nnzeroGroups_csc_T(
     auto groups_ = groups.unchecked<1>();
 
     // create result matrix
-    py::array_t<int> res({ngroups, nrow});
+    py::array_t<count_t> res({ngroups, nrow});
     auto buf_res = res.request();
-    int* ptr_res = (int*)buf_res.ptr;
+    count_t* ptr_res = (count_t*)buf_res.ptr;
 
     // initialize res to 0
-    int total_size = ngroups * nrow;
-    std::memset(ptr_res, 0, sizeof(int) * total_size);
+    index_t total_size = ngroups * nrow;
+    std::memset(ptr_res, 0, sizeof(count_t) * total_size);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -594,28 +597,28 @@ py::array_t<int> cpp_nnzeroGroups_csc_T(
 
     {
         py::gil_scoped_release release;
-        std::vector<int> local_sums(threads_to_use * total_size, 0);
+        std::vector<count_t> local_sums(static_cast<size_t>(threads_to_use) * total_size, 0);
 
         #pragma omp parallel num_threads(threads_to_use)
         {
             const int thread_id = omp_get_thread_num();
-            int* local_buffer = local_sums.data() + thread_id * total_size;
+            count_t* local_buffer = local_sums.data() + thread_id * total_size;
 
             #pragma omp for schedule(dynamic)
-            for (int c = 0; c < ncol; ++c) {
-                const int group = groups_(c);
+            for (index_t c = 0; c < ncol; ++c) {
+                const index_t group = groups_(c);
                 if (group >= ngroups) continue; // skip invalid group
 
-                for (int j = p_(c); j < p_(c+1); ++j) {
-                    const int row = i_(j);
+                for (index_t j = p_(c); j < p_(c+1); ++j) {
+                    const index_t row = i_(j);
                     if (row >= nrow) continue;
                     local_buffer[group * nrow + row] ++;
                 }
             }
         }
         #pragma omp parallel for schedule(static)
-        for (int idx = 0; idx < total_size; ++idx) {
-            int acc = 0;
+        for (index_t idx = 0; idx < total_size; ++idx) {
+            count_t acc = 0;
 
             for (int t = 0; t < threads_to_use; ++t) {
                 acc += local_sums[t * total_size + idx];
@@ -626,12 +629,12 @@ py::array_t<int> cpp_nnzeroGroups_csc_T(
     return res;
 }
 
-py::array_t<int> cpp_nnzeroGroups_csr_T(
-    py::array_t<int> p,
-    py::array_t<int> i,
-    int nrow,
-    py::array_t<int> groups,
-    int ngroups,
+py::array_t<count_t> cpp_nnzeroGroups_csr_T(
+    py::array_t<index_t> p,
+    py::array_t<index_t> i,
+    index_t nrow,
+    py::array_t<index_t> groups,
+    index_t ngroups,
     int nthreads
 ) {
     auto p_ = p.unchecked<1>();
@@ -639,10 +642,10 @@ py::array_t<int> cpp_nnzeroGroups_csr_T(
     auto groups_ = groups.unchecked<1>();
 
     // create result matrix
-    py::array_t<int, py::array::f_style> res({ngroups, nrow});
+    py::array_t<count_t, py::array::f_style> res({ngroups, nrow});
     auto res_ = res.mutable_unchecked<2>();
 
-    std::memset(res_.mutable_data(0, 0), 0, sizeof(int) * ngroups * nrow);
+    std::memset(res_.mutable_data(0, 0), 0, sizeof(count_t) * ngroups * nrow);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -655,11 +658,11 @@ py::array_t<int> cpp_nnzeroGroups_csr_T(
         py::gil_scoped_release release;
 
         #pragma omp parallel for num_threads(threads_to_use) schedule(dynamic)
-        for (int r = 0; r < nrow; ++r) {
-            for (int j = p_(r); j < p_(r + 1); ++j) {
-                const int col = i_(j);
+        for (index_t r = 0; r < nrow; ++r) {
+            for (index_t j = p_(r); j < p_(r + 1); ++j) {
+                const index_t col = i_(j);
                 if (col >= groups_.shape(0)) continue;
-                const int group = groups_(col);
+                const index_t group = groups_(col);
                 if (group >= ngroups) continue;
                 res_(group, r) ++; // Different threads write to different columns, safe
             }
@@ -671,10 +674,10 @@ py::array_t<int> cpp_nnzeroGroups_csr_T(
 
 std::vector<std::vector<float>> cpp_rank_matrix_csc(
     py::array_t<double> x_in,         // CSC format: non-zero values
-    py::array_t<int> p_in,            // CSC format: column pointers
+    py::array_t<index_t> p_in,        // CSC format: column pointers
     py::array_t<double> rank_data_out,// Output: array to store ranks
-    int nrow,
-    int ncol,
+    index_t nrow,
+    index_t ncol,
     int nthreads
 ) {
 	// get ptr for input data
@@ -706,11 +709,11 @@ std::vector<std::vector<float>> cpp_rank_matrix_csc(
 
     	#pragma omp parallel num_threads(threads_to_use)
     	{
-    		std::vector<std::pair<double, int>> workspace;
+    		std::vector<std::pair<double, index_t>> workspace;
     		#pragma omp for schedule(dynamic)
-    		for (int col = 0; col < ncol; ++col) {
-    			int start_idx = p_(col);
-    			int end_idx = p_(col + 1);
+    		for (index_t col = 0; col < ncol; ++col) {
+    			index_t start_idx = p_(col);
+    			index_t end_idx = p_(col + 1);
 
     			// all-zero column
     			if (start_idx == end_idx) {
@@ -718,11 +721,11 @@ std::vector<std::vector<float>> cpp_rank_matrix_csc(
             		continue;
     			}
     			// number of zeros in the column
-    			int n_zero = nrow - (end_idx - start_idx);
+    			index_t n_zero = nrow - (end_idx - start_idx);
     			// allocate for workspace
     			workspace.clear();
     			workspace.reserve(end_idx - start_idx);
-    			for (int i = start_idx; i < end_idx; ++i) {
+    			for (index_t i = start_idx; i < end_idx; ++i) {
             		workspace.emplace_back(ptr_x[i], i);
         		}
     			// sort by value to find ties
@@ -734,7 +737,7 @@ std::vector<std::vector<float>> cpp_rank_matrix_csc(
         		for (i = 1; i < workspace.size(); ++i) {
         			if (!is_tied(workspace[i].first, workspace[i - 1].first)) {
         				double avg_rank = (rank_sum / n) + 1 + n_zero;
-        				for (int j = 0; j < n; ++j) {
+        				for (index_t j = 0; j < n; ++j) {
         					ptr_out[workspace[i - 1 - j].second] = avg_rank;
         				}
         				if (n > 1) ties[col].push_back(static_cast<float>(n));
@@ -747,7 +750,7 @@ std::vector<std::vector<float>> cpp_rank_matrix_csc(
         		}
         		// the last group
         		double avg_rank = (rank_sum / n) + 1 + n_zero;
-        		for (int j = 0; j < n; ++j) {
+        		for (index_t j = 0; j < n; ++j) {
         			ptr_out[workspace[i - 1 - j].second] = avg_rank;
         		}
         		if (n > 1) ties[col].push_back(static_cast<float>(n));
@@ -761,11 +764,11 @@ std::vector<std::vector<float>> cpp_rank_matrix_csc(
 
 py::dict cpp_rank_matrix_csr(
     py::array_t<double> data_in,
-    py::array_t<int> p_in,
-    py::array_t<int> i_in,
+    py::array_t<index_t> p_in,
+    py::array_t<index_t> i_in,
     py::array_t<double> rank_data_out,
-    int nrow,
-    int ncol,
+    index_t nrow,
+    index_t ncol,
     int nthreads
 ) {
     auto data = data_in.unchecked<1>();
@@ -777,8 +780,8 @@ py::dict cpp_rank_matrix_csr(
     double* ptr_out = static_cast<double*>(buf_out.ptr);
 
     std::vector<std::vector<float>> ties(ncol);
-    std::vector<std::vector<int>> i_csc(ncol);
-    std::vector<std::vector<std::pair<double, int>>> col_data(ncol);
+    std::vector<std::vector<index_t>> i_csc(ncol);
+    std::vector<std::vector<std::pair<double, index_t>>> col_data(ncol);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -790,32 +793,32 @@ py::dict cpp_rank_matrix_csr(
     omp_set_num_threads(threads_to_use);
 
     // get col_data type of csr matrix
-    for (int i = 0; i < nrow; ++i) {
-        for (int idx = p_(i); idx < p_(i + 1); ++idx) {
-            int col = i_(idx);
+    for (index_t i = 0; i < nrow; ++i) {
+        for (index_t idx = p_(i); idx < p_(i + 1); ++idx) {
+            index_t col = i_(idx);
             col_data[col].emplace_back(data(idx), col_data[col].size());
             i_csc[col].emplace_back(i);
         }
     }
 
     // get off-set of csc index
-    std::vector<int> csc_offset(ncol + 1, 0);
-    std::vector<int> indices;
+    std::vector<index_t> csc_offset(ncol + 1, 0);
+    std::vector<index_t> indices;
     indices.reserve(nnz);
-    for (int col = 1; col <= ncol; ++col) {
-        csc_offset[col] = csc_offset[col - 1] + static_cast<int>(col_data[col - 1].size());
+    for (index_t col = 1; col <= ncol; ++col) {
+        csc_offset[col] = csc_offset[col - 1] + static_cast<index_t>(col_data[col - 1].size());
         indices.insert(indices.end(), i_csc[col-1].begin(), i_csc[col-1].end());
     }
 
     // rank for each column
     #pragma omp parallel for schedule(dynamic)
-    for (int col = 0; col < ncol; ++col) {
+    for (index_t col = 0; col < ncol; ++col) {
         if (col_data[col].empty()) {
             // all-zero column
             ties[col].push_back(static_cast<float>(nrow));
             continue;
         }
-        int n_zero = nrow - col_data[col].size();
+        index_t n_zero = nrow - col_data[col].size();
 
         // rank each column
         std::sort(col_data[col].begin(), col_data[col].end());
@@ -826,7 +829,7 @@ py::dict cpp_rank_matrix_csr(
         for (i = 1; i < col_data[col].size(); ++i) {
             if (!is_tied(col_data[col][i].first, col_data[col][i - 1].first)) {
                 double avg_rank = (rank_sum / n) + 1 + n_zero;
-                for (int j = 0; j < n; ++j) {
+                for (index_t j = 0; j < n; ++j) {
                     ptr_out[col_data[col][i - 1 - j].second + csc_offset[col]] = avg_rank;
                 }
                 if (n > 1) ties[col].push_back(n);
@@ -839,7 +842,7 @@ py::dict cpp_rank_matrix_csr(
         }
         // for the last group
         double avg_rank = (rank_sum / n) + 1 + n_zero;
-        for (int j = 0; j < n; ++j) {
+        for (index_t j = 0; j < n; ++j) {
             ptr_out[col_data[col][i - 1 - j].second + csc_offset[col]] = avg_rank;
         }
         if (n > 1) ties[col].push_back(n);
@@ -855,11 +858,11 @@ py::dict cpp_rank_matrix_csr(
 
 std::vector<std::vector<float>> cpp_rank_matrix_csr_(
     py::array_t<double> data_in,
-    py::array_t<int> p_in,
-    py::array_t<int> i_in,
+    py::array_t<index_t> p_in,
+    py::array_t<index_t> i_in,
     py::array_t<double> rank_data_out,
-    int nrow,
-    int ncol,
+    index_t nrow,
+    index_t ncol,
     int nthreads
 ) {
     auto data = data_in.unchecked<1>();
@@ -870,7 +873,7 @@ std::vector<std::vector<float>> cpp_rank_matrix_csr_(
     double* ptr_out = static_cast<double*>(buf_out.ptr);
 
     std::vector<std::vector<float>> ties(ncol);
-    std::vector<std::vector<std::pair<double, int>>> col_data(ncol);
+    std::vector<std::vector<std::pair<double, index_t>>> col_data(ncol);
 
     // Set number of threads
     const int max_threads = omp_get_max_threads();
@@ -882,28 +885,28 @@ std::vector<std::vector<float>> cpp_rank_matrix_csr_(
     omp_set_num_threads(threads_to_use);
 
     // get col_data type of csr matrix
-    for (int i = 0; i < nrow; ++i) {
-        for (int idx = p_(i); idx < p_(i + 1); ++idx) {
-            int col = i_(idx);
+    for (index_t i = 0; i < nrow; ++i) {
+        for (index_t idx = p_(i); idx < p_(i + 1); ++idx) {
+            index_t col = i_(idx);
             col_data[col].emplace_back(data(idx), col_data[col].size());
         }
     }
 
     // get off-set of csc index
-    std::vector<int> csc_offset(ncol, 0);
-    for (int col = 1; col < ncol; ++col) {
-        csc_offset[col] = csc_offset[col - 1] + static_cast<int>(col_data[col - 1].size());
+    std::vector<index_t> csc_offset(ncol, 0);
+    for (index_t col = 1; col < ncol; ++col) {
+        csc_offset[col] = csc_offset[col - 1] + static_cast<index_t>(col_data[col - 1].size());
     }
 
     // rank for each column
     #pragma omp parallel for schedule(dynamic)
-    for (int col = 0; col < ncol; ++col) {
+    for (index_t col = 0; col < ncol; ++col) {
         if (col_data[col].empty()) {
             // all-zero column
             ties[col].push_back(static_cast<float>(nrow));
             continue;
         }
-        int n_zero = nrow - col_data[col].size();
+        index_t n_zero = nrow - col_data[col].size();
 
         // rank each column
         std::sort(col_data[col].begin(), col_data[col].end());
@@ -914,7 +917,7 @@ std::vector<std::vector<float>> cpp_rank_matrix_csr_(
         for (i = 1; i < col_data[col].size(); ++i) {
             if (!is_tied(col_data[col][i].first, col_data[col][i - 1].first)) {
                 double avg_rank = (rank_sum / n) + 1 + n_zero;
-                for (int j = 0; j < n; ++j) {
+                for (index_t j = 0; j < n; ++j) {
                     ptr_out[col_data[col][i - 1 - j].second + csc_offset[col]] = avg_rank;
                 }
                 if (n > 1) ties[col].push_back(n);
@@ -927,7 +930,7 @@ std::vector<std::vector<float>> cpp_rank_matrix_csr_(
         }
         // for the last group
         double avg_rank = (rank_sum / n) + 1 + n_zero;
-        for (int j = 0; j < n; ++j) {
+        for (index_t j = 0; j < n; ++j) {
             ptr_out[col_data[col][i - 1 - j].second + csc_offset[col]] = avg_rank;
         }
         if (n > 1) ties[col].push_back(n);
@@ -1035,10 +1038,10 @@ py::dict cpp_rank_matrix_dense(
 void cpp_group_rank_csc(
     py::array_t<double> x_in,           // csc data
     py::array_t<double> rank_data_out,  // output rank data
-    py::array_t<int> p_in,              // indptr for col
-    py::array_t<int> i_in,              // indice for row
-    py::array_t<int> groups,            // group id for each cell
-    int n_cols,                         // number of genes
+    py::array_t<index_t> p_in,          // indptr for col
+    py::array_t<index_t> i_in,          // indice for row
+    py::array_t<index_t> groups,        // group id for each cell
+    index_t n_cols,                     // number of genes
     int nthreads                       // OpenMP threads
 ) {
 
@@ -1071,18 +1074,18 @@ void cpp_group_rank_csc(
         {
             std::vector<Entry> col_entries;
             #pragma omp for schedule(dynamic)
-            for (int col = 0; col < n_cols; ++col) {
-                int start = p_(col);
-                int end = p_(col + 1);
+            for (index_t col = 0; col < n_cols; ++col) {
+                index_t start = p_(col);
+                index_t end = p_(col + 1);
 
                 if (start == end) continue;
 
                 // collect all non-zero information
                 col_entries.clear();
                 col_entries.reserve(end - start);
-                for (int idx = start; idx < end; ++idx) {
-                    int row = i_(idx);
-                    int group = groups_(row);
+                for (index_t idx = start; idx < end; ++idx) {
+                    index_t row = i_(idx);
+                    index_t group = groups_(row);
                     double value = ptr_x[idx];
                     col_entries.push_back({idx, group, value});
                 }
@@ -1094,7 +1097,7 @@ void cpp_group_rank_csc(
                 // col_entries: [group_0_low, group_0_medium, group_0_large,
                 //               group_1_low, group_1_medium, group_1_large, ...]
                 if (!col_entries.empty()) {
-                    int current_group = col_entries[0].group_id;
+                    index_t current_group = col_entries[0].group_id;
                     double current_rank = 1.0;
                     for (const auto& entry : col_entries) {
                         if (current_group != entry.group_id) {
@@ -1113,15 +1116,15 @@ void cpp_group_rank_csc(
 void cpp_group_rank_dense(
     py::array_t<double> x_in,               // dense data
     py::array_t<double> rank_data_out,      // output_rank_data
-    py::array_t<int> groups,                // group id for each row
+    py::array_t<index_t> groups,            // group id for each row
     int nthreads                            // OpenMP threads
 ) {
     auto x_ = x_in.unchecked<2>();
     auto out_ = rank_data_out.mutable_unchecked<2>();
     auto groups_ = groups.unchecked<1>();
 
-    int n_rows = static_cast<int>(x_.shape(0));
-    int n_cols = static_cast<int>(x_.shape(1));
+    index_t n_rows = static_cast<index_t>(x_.shape(0));
+    index_t n_cols = static_cast<index_t>(x_.shape(1));
 
     // set number of threads
     const int max_threads = omp_get_max_threads();
@@ -1140,20 +1143,20 @@ void cpp_group_rank_dense(
             col_entries.reserve(n_rows);
 
             #pragma omp for schedule(dynamic)
-            for (int col = 0; col < n_cols; ++col) {
+            for (index_t col = 0; col < n_cols; ++col) {
                 col_entries.clear();
 
-                for (int row = 0; row < n_rows; ++row) {
+                for (index_t row = 0; row < n_rows; ++row) {
                     double val = x_(row, col);
 
                     if (std::abs(val) > 1e-15) {
-                        int grp = groups_(row);
+                        index_t grp = groups_(row);
                         col_entries.push_back({row, grp, val});
                     }
                 }
                 std::sort(col_entries.begin(), col_entries.end());
                 if (!col_entries.empty()) {
-                    int current_group = col_entries[0].group_id;
+                    index_t current_group = col_entries[0].group_id;
                     double current_rank = 1.0;
                     for (const auto& entry : col_entries) {
                         if (current_group != entry.group_id) {
