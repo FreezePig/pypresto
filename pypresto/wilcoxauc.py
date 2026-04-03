@@ -345,12 +345,24 @@ def _process_mask_var(mask_var, data, is_adata, n_genes):
     return mask
 
 def _remove_all_zero_genes(X, var_names):
-    """Remove genes whose expression is zero across all cells."""
-    if sp.issparse(X):
-        nonzero_mask = np.asarray(X.getnnz(axis=0)).ravel() > 0
-    else:
-        nonzero_mask = np.any(X != 0, axis=0)
+    """
+    Remove genes whose expression is zero across all cells.
+    Sparse inputs have already remove explicit zeros via `adata_copy.X.eliminate_zeros()`
+    """
+    if sp.isspmatrix_csr(X):
+        n_genes = X.shape[1]
+        nonzero_mask = np.zeros(n_genes, dtype=bool)
+        nonzero_mask[X.indices] = True
 
+    elif sp.isspmatrix_csc(X):
+        nonzero_mask = np.diff(X.indptr) > 0
+
+    elif sp.issparse(X):
+        nonzero_mask = np.asarray(X.getnnz(axis=0)).ravel() > 0
+    
+    else:
+        nonzero_mask = np.any(X!=0, axis=0)
+        
     if not np.any(nonzero_mask):
         raise ValueError("No genes remain after filtering all-zero genes.")
 
