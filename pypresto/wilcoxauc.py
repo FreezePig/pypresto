@@ -119,7 +119,6 @@ def wilcoxauc(
         mask = _process_mask_var(mask_var, data, is_adata, X.shape[1])
         X = X[:, mask]
         var_names = np.asarray(var_names)[mask].tolist() if var_names is not None else None
-    X, var_names = _remove_all_zero_genes(X, var_names)
     end_time = time.time()
     if verbose:
         print(f"Mask processing took {end_time - start_time:.2f} seconds.")
@@ -279,6 +278,114 @@ def calc_gini(
     # 7. Return results
     return long_df
 
+def prefilter_matrix(
+    data: Union[AnnData, np.ndarray, sp.spmatrix, pd.DataFrame], 
+    var_names: Optional[Union[list, np.ndarray, pd.Index]] = None,
+    *,
+    layer: Optional[str] = None,
+    use_raw: bool = False,
+    copy: bool = True,
+):
+    """
+    Remove explicit zeros from inputs and drop all-zero gene columns.
+
+    Parameters
+    ----------
+    data
+        AnnData, ndarray, sparse matrix, or DataFrame. Shape must be cells x genes.
+    var_names
+        Required when `data` is `np.ndarray` or `sp.spmatrix`.
+        Ignored for `AnnData` or `pd.DataFrame`
+    layer
+        AnnData layer to use. Ignored for non-AnnData inputs.
+    use_raw
+        If True, build the result from `adata.raw`. Ignored for non-AnnData inputs.
+    copy
+        If True, return a new object. If False, mutate AnnData / sparse inputs where practical.
+
+    Returns
+    -------
+    If data is AnnData:
+        AnnData
+    If data is DataFrame:
+        DataFrame
+    If data is ndarray or sparse matrix:
+        (X_filtered, var_names_filtered)
+    """
+    if isinstance(data, AnnData):
+        if layer is not None and use_raw:
+            raise ValueError("`layer` and `use_raw` only for AnnData inputs.")
+        
+        if use_raw:
+            if data.raw is None:
+                raise ValueError("adata.raw is not available.")
+            X = data.raw.X.copy() if copy else data.raw.X
+            if sp.issparse(X):
+                X.eliminate_zeros()
+            
+            nonzero_mask = _build_nonzero_mask(X)
+            X = X[:, nonzero_mask]
+            raw_var = data.raw.var.loc[nonzero_mask].copy()
+
+            result = ad.AnnData(
+                X = X,
+                obs = data.obs.copy(),
+                var = raw_var,
+            )
+            result.uns = dict(data.uns)
+            for key in data.obsm.keys():
+                result.obsm[key] = data.obsm[key].copy()
+            for key in data.obsp.keys():
+                result.obsp[key] = data.obsp[key].copy()
+            return result
+        
+        adata = data.copy() if copy else data
+
+        if layer is not None:
+            if layer not in adata.layers:
+                raise KeyError(f"Layer '{layer}' not found in adata.layers")
+            X = adata.layers[layer]
+        else:
+            X = adata.X
+        
+        if sp.issparse(X):
+            X.eliminate_zeros()
+
+        nonzero_mask = _build_nonzero_mask(X)
+        if not np.all(nonzero_mask):
+            adata._inplace_subset_var(nonzero_mask)
+
+        return adata
+    
+    if isinstance(data, pd.DataFrame):
+        X = data.to_numpy()
+        nonzero_mask = _build_nonzero_mask(X)
+        return data.loc[:, nonzero_mask]
+    
+    if isinstance(data, np.ndarray):
+        if var_names is None:
+            raise ValueError("var_names must be provided when data is np.ndarray.")
+        var_names = np.asarray(var_names)
+        if var_names.shape[0] != data.shape[1]:
+            raise ValueError(f"Length of var_names ({var_names.shape[0]}) does not "
+                             f"match number of genes ({data.shape[1]}).")
+        nonzero_mask = _build_nonzero_mask(data)
+        return data[:, nonzero_mask], var_names[nonzero_mask].tolist()
+    
+    if sp.issparse(data):
+        if var_names is None:
+            raise ValueError("var_names must be provided when data is sparse matrix.")
+        var_names = np.asarray(var_names)
+        if var_names.shape[0] != data.shape[1]:
+            raise ValueError(f"Length of var_names ({var_names.shape[0]}) does not "
+                             f"match number of genes ({data.shape[1]}).")
+        X = data.copy() if copy else data
+        X.eliminate_zeros()
+        nonzero_mask = _build_nonzero_mask(X)
+        return X[:, nonzero_mask], var_names[nonzero_mask].tolist()
+
+    raise TypeError(f"Unsupported data type: {type(data)}")
+
 def _extract_data_and_groups(data, groupby, layer = None, use_raw = None):
     """Extract data matrix X, group labels y and variable names from input data"""
     if isinstance(data, AnnData):
@@ -344,35 +451,22 @@ def _process_mask_var(mask_var, data, is_adata, n_genes):
             raise ValueError("mask_var length must match number of genes")
     return mask
 
-def _remove_all_zero_genes(X, var_names):
-    """
-    Remove genes whose expression is zero across all cells.
-    Sparse inputs have already remove explicit zeros via `adata_copy.X.eliminate_zeros()`
-    """
+def _build_nonzero_mask(X):
+    """Return a boolean mask of genes that are not all zero."""
     if sp.isspmatrix_csr(X):
-        n_genes = X.shape[1]
-        nonzero_mask = np.zeros(n_genes, dtype=bool)
+        nonzero_mask = np.zeros(X.shape[1], dtype=bool)
         nonzero_mask[X.indices] = True
-
     elif sp.isspmatrix_csc(X):
         nonzero_mask = np.diff(X.indptr) > 0
-
     elif sp.issparse(X):
         nonzero_mask = np.asarray(X.getnnz(axis=0)).ravel() > 0
-    
     else:
-        nonzero_mask = np.any(X!=0, axis=0)
-        
+        nonzero_mask = np.any(X != 0, axis=0)
+
     if not np.any(nonzero_mask):
         raise ValueError("No genes remain after filtering all-zero genes.")
 
-    if np.all(nonzero_mask):
-        return X, var_names
-
-    X = X[:, nonzero_mask]
-    if var_names is not None:
-        var_names = np.asarray(var_names)[nonzero_mask].tolist()
-    return X, var_names
+    return nonzero_mask
 
 def _encode_groups(y, groups):
     """Encode group labels and determine target groups for comparison"""
