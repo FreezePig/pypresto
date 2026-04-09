@@ -542,8 +542,17 @@ def _wilcoxauc_core(X, y, corr_method, nthreads, verbose):
         print("Computing expression statistics...")
     start_time = time.time()
 
+    substep_time = time.time()
     group_sum = sum_groups(X, y, trans=False, nthreads=nthreads)
+    if verbose:
+        print(f"Expression stats: sum_groups took {time.time() - substep_time:.2f} seconds.")
+
+    substep_time = time.time()
     group_nnz = nnz_groups(X, y, trans=False, nthreads=nthreads)
+    if verbose:
+        print(f"Expression stats: nnz_groups took {time.time() - substep_time:.2f} seconds.")
+
+    substep_time = time.time()
     group_mean = group_sum / group_size[:, np.newaxis]
 
     pct_1 = (group_nnz / group_size[:, np.newaxis]) * 100
@@ -561,6 +570,8 @@ def _wilcoxauc_core(X, y, corr_method, nthreads, verbose):
     
     lfc = np.log2((group_mean + epsilon) / (rest_mean + epsilon))
     lfc_sec = np.log2((group_mean + epsilon) / (sec_mean + epsilon))
+    if verbose:
+        print(f"Expression stats: numpy post-processing took {time.time() - substep_time:.2f} seconds.")
     if verbose:
         print(f"Expression statistics computation took {time.time() - start_time:.2f} seconds.")
         print("================================")
