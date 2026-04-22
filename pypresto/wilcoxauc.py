@@ -524,13 +524,16 @@ def _wilcoxauc_core(X, y, corr_method, nthreads, verbose):
     pval_matrix, z_norm_matrix = compute_pval(ustat_matrix, ties_info, n_cells, n1n2)
 
     # multiple testing correction
-    fdr = np.zeros_like(pval_matrix)
+    fdr = np.full_like(pval_matrix, fill_value=np.nan, dtype=float)
     for g in range(n_groups):
-        _, fdr[g, :], _, _ = multipletests(
-            pval_matrix[g, :],
-            alpha=0.05,
-            method='fdr_bh' if corr_method == 'benjamini-hochberg' else 'bonferroni'
-        )
+        valid = ~np.isnan(pval_matrix[g, :])
+        if np.any(valid):
+            _, fdr[g, valid], _, _ = multipletests(
+                pval_matrix[g, valid],
+                alpha=0.05,
+                method='fdr_bh' if corr_method == 'benjamini-hochberg' else 'bonferroni'
+            )
+
     auc = ustat_matrix / n1n2
     
     if verbose:

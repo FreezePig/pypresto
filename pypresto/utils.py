@@ -199,13 +199,21 @@ def compute_pval(ustat: np.ndarray, ties: List, N: int, n1n2: np.ndarray) -> Tup
             sigma[j] = (x1 - tie_correction) * x2
         else:
             sigma[j] = x1 * x2
-    
-    # calc u_sigma (outer product)
-    u_sigma = np.sqrt(n1n2[:, np.newaxis] * sigma[np.newaxis, :])
-    # normalization
-    z_norm = z / u_sigma
 
-    pvals = 2 * norm.cdf(-np.abs(z_norm))
+    invalid_cols = np.isclose(sigma, 0.0) | (sigma < 0)
+    valid_cols = ~invalid_cols
+
+    pvals = np.full_like(ustat, fill_value=np.nan, dtype=float)
+    z_norm = np.full_like(ustat, fill_value=np.nan, dtype=float)
+
+    if np.any(valid_cols):
+        # calc z and p values
+        u_sigma = np.sqrt(n1n2[:, np.newaxis] * sigma[valid_cols][np.newaxis, :])
+        z_valid = z[:, valid_cols] / u_sigma
+        p_valid = 2 * norm.cdf(-np.abs(z_valid))
+        # copy values
+        z_norm[:, valid_cols] = z_valid
+        pvals[:, valid_cols] = p_valid
     return pvals, z_norm
 
 def compute_nnz_gini(X: Union[np.ndarray, sp.csc_matrix, sp.csr_matrix],
