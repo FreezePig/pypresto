@@ -516,7 +516,7 @@ def _wilcoxauc_core(X, y, corr_method, nthreads, verbose):
     # three type of X: dense ndarray, csr_matrix, csc_matrix
     rank_result = rank_matrix(X, nthreads=nthreads)
     # calculate pvals matrix and z-norm score matrix
-    X_ranked = rank_result['X_ranked'] # sp.csr_matrix or np.ndarrayy
+    X_ranked = rank_result['X_ranked'] # sp.csr_matrix or np.ndarray
     ties_info = rank_result['ties'] # List of lists
     if verbose:
         print(f"Ranking matrix took {time.time() - start_time:.2f} seconds.")
